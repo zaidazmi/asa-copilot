@@ -1,4 +1,4 @@
-"""Apple Search Ads CLI - Main entry point."""
+"""asa-copilot CLI entry point."""
 
 from typing import Optional
 
@@ -7,12 +7,22 @@ from rich.console import Console
 from rich.panel import Panel
 
 from . import __version__
-from .commands import acl, adgroups, ads, budget, campaigns, config, geo, keywords, optimize, reports
+from .commands import acl, adgroups, ads, budget, campaigns, config, geo, keywords, optimize, plan, reports
 from .config import set_current_app
+from .api import SearchAdsClient
+from .config import load_credentials
+from .plans import (
+    PlanLoadError,
+    apply_plan,
+    display_apply_result,
+    display_plan,
+    load_plan,
+    save_applied_plan,
+)
 
 app = typer.Typer(
     name="asa",
-    help="Apple Search Ads CLI - manage campaigns, keywords, and reporting.",
+    help="asa-copilot - Apple Search Ads operations CLI.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -24,6 +34,7 @@ app.add_typer(config.app, name="config", help="Configuration management")
 app.add_typer(campaigns.app, name="campaigns", help="Campaign management")
 app.add_typer(adgroups.app, name="adgroups", help="Ad group management")
 app.add_typer(keywords.app, name="keywords", help="Keyword management")
+app.add_typer(plan.app, name="plan", help="Review saved change plans")
 app.add_typer(reports.app, name="reports", help="Reporting and analytics")
 app.add_typer(optimize.app, name="optimize", help="Automated campaign optimization")
 app.add_typer(budget.app, name="budget", help="Budget order management")
@@ -42,10 +53,10 @@ def version():
 def help_command():
     """Show help and quick start guide."""
     help_text = """
-[bold cyan]Apple Search Ads CLI[/bold cyan]
+[bold cyan]asa-copilot[/bold cyan]
 
-A command-line tool for managing Apple Search Ads campaigns following
-Apple's recommended 4-campaign structure.
+A command-line operations tool for Apple Search Ads campaign setup,
+reporting, keyword management, and optimization.
 
 [bold]Quick Start:[/bold]
 
@@ -88,6 +99,11 @@ Apple's recommended 4-campaign structure.
     asa keywords find           - Search keywords across ad groups
     asa keywords update-bids-bulk - Bulk update keyword bids
     asa keywords promote        - Graduate Discovery keywords to exact
+
+  [bold cyan]Plans:[/bold cyan]
+    asa optimize --lookback 14d --out plan.json - Save an optimization plan
+    asa plan show plan.json     - Review a saved plan
+    asa apply plan.json         - Apply a saved plan and save audit history
 
   [bold cyan]Reports:[/bold cyan]
     asa reports summary         - Performance summary across campaigns
@@ -161,6 +177,7 @@ Apple's recommended 4-campaign structure.
 
   Run weekly optimization:
     [cyan]asa optimize --dry-run[/cyan]
+    [cyan]asa optimize --lookback 14d --out plan.json[/cyan]
     [cyan]asa optimize --auto-approve[/cyan]
 
 [bold]Multi-App Management:[/bold]
@@ -187,9 +204,54 @@ Apple's recommended 4-campaign structure.
     https://developer.apple.com/documentation/apple_ads
 
   GitHub:
-    https://github.com/cameronehrlich/apple-search-ads-cli
+    https://github.com/zaidazmi/asa-copilot
 """
     console.print(Panel(help_text, title="ASA CLI Help", border_style="cyan"))
+
+
+@app.command("apply")
+def apply_plan_cmd(
+    path: str = typer.Argument(..., help="Path to a plan JSON file"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", "-y", help="Skip confirmation prompt"),
+    output_json: bool = typer.Option(False, "--json", help="Output apply result as JSON"),
+):
+    """Apply a saved change plan and record it in local audit history."""
+    import json
+    from pathlib import Path
+    from rich.prompt import Confirm
+
+    try:
+        change_plan = load_plan(Path(path))
+    except PlanLoadError as exc:
+        if output_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    credentials = load_credentials()
+    if not credentials:
+        if output_json:
+            print(json.dumps({"error": "No credentials configured"}))
+        else:
+            console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    if not output_json:
+        display_plan(change_plan)
+        if not auto_approve and not Confirm.ask("[bold]Apply this plan?[/bold]"):
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
+
+    client = SearchAdsClient(credentials)
+    result = apply_plan(client, change_plan)
+    save_applied_plan(change_plan, result)
+
+    if output_json:
+        print(json.dumps(result.model_dump(mode="json"), indent=2))
+        return
+
+    display_apply_result(result)
 
 
 @app.callback()
@@ -203,7 +265,7 @@ def main(
         envvar="ASA_APP",
     ),
 ):
-    """Apple Search Ads CLI - manage campaigns, keywords, and reporting."""
+    """Apple Search Ads operations CLI."""
     if app_slug:
         set_current_app(app_slug)
 

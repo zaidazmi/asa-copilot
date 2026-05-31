@@ -5,9 +5,9 @@ import os
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from rich.console import Console
 from rich.prompt import Prompt
 
@@ -16,6 +16,7 @@ console = Console()
 CONFIG_DIR = Path.home() / ".asa-cli"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
+RULES_FILE = CONFIG_DIR / "rules.json"
 
 
 class CampaignType(str, Enum):
@@ -123,6 +124,87 @@ class Credentials(BaseModel):
     public_key_path: Optional[str] = Field(None, description="Path to public key PEM file")
 
 
+class AppGoals(BaseModel):
+    """Business goals used by reports and optimization rules."""
+
+    target_cpa: Optional[float] = Field(None, ge=0, description="Target cost per acquisition")
+    target_roas: Optional[float] = Field(None, ge=0, description="Target ROAS multiplier")
+    monthly_budget: Optional[float] = Field(None, ge=0, description="Planned monthly budget")
+
+
+class CampaignStrategyConfig(BaseModel):
+    """Expected campaign structure for the app."""
+
+    strategy: str = Field("four_campaigns", description="Campaign strategy name")
+    search_results_only: bool = Field(True, description="Prefer Search Results placements")
+    one_country_per_campaign: bool = Field(True, description="Prefer geo-specific campaigns")
+    discovery_search_match_enabled: bool = Field(False, description="Allow Search Match discovery")
+    campaign_types: list[CampaignType] = Field(
+        default_factory=lambda: [
+            CampaignType.BRAND,
+            CampaignType.CATEGORY,
+            CampaignType.COMPETITOR,
+            CampaignType.DISCOVERY,
+        ]
+    )
+
+
+class OptimizationThresholds(BaseModel):
+    """Thresholds used when turning performance data into recommendations."""
+
+    cpa_threshold: float = Field(5.0, ge=0)
+    min_installs: int = Field(2, ge=0)
+    min_spend: float = Field(1.0, ge=0)
+    min_impressions: int = Field(0, ge=0)
+    loser_min_spend: Optional[float] = Field(None, ge=0)
+
+
+class BidRules(BaseModel):
+    """Guardrails for bid changes."""
+
+    max_bid_change_pct: float = Field(25.0, ge=0, le=100)
+    min_bid: Optional[float] = Field(None, ge=0)
+    max_bid: Optional[float] = Field(None, ge=0)
+
+    @field_validator("max_bid")
+    @classmethod
+    def validate_max_bid(cls, value: Optional[float], info):
+        min_bid = info.data.get("min_bid")
+        if value is not None and min_bid is not None and value < min_bid:
+            raise ValueError("max_bid must be greater than or equal to min_bid")
+        return value
+
+
+class ReportingDefaults(BaseModel):
+    """Default report windows and filters."""
+
+    summary_days: int = Field(30, ge=1)
+    search_terms_days: int = Field(14, ge=1)
+    min_impressions: int = Field(10, ge=0)
+    currency: str = Field("USD", min_length=3, max_length=3)
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        return value.upper()
+
+
+class RulesConfig(BaseModel):
+    """Combined app/rule configuration available to commands."""
+
+    currency: str = Field("USD", min_length=3, max_length=3)
+    goals: AppGoals = Field(default_factory=AppGoals)
+    campaign_strategy: CampaignStrategyConfig = Field(default_factory=CampaignStrategyConfig)
+    optimization: OptimizationThresholds = Field(default_factory=OptimizationThresholds)
+    bids: BidRules = Field(default_factory=BidRules)
+    reporting: ReportingDefaults = Field(default_factory=ReportingDefaults)
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        return value.upper()
+
+
 class AppConfig(BaseModel):
     """Application configuration."""
 
@@ -131,6 +213,17 @@ class AppConfig(BaseModel):
     default_countries: list[str] = Field(default=["US"], description="Default target countries")
     default_bid: float = Field(default=1.50, description="Default keyword bid in USD")
     default_cpa_goal: Optional[float] = Field(None, description="Default CPA goal in USD")
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    goals: AppGoals = Field(default_factory=AppGoals)
+    campaign_strategy: CampaignStrategyConfig = Field(default_factory=CampaignStrategyConfig)
+    optimization: OptimizationThresholds = Field(default_factory=OptimizationThresholds)
+    bids: BidRules = Field(default_factory=BidRules)
+    reporting: ReportingDefaults = Field(default_factory=ReportingDefaults)
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        return value.upper()
 
 
 class MultiAppConfig(BaseModel):
@@ -190,6 +283,100 @@ def save_credentials(credentials: Credentials) -> None:
         json.dump(credentials.model_dump(), f, indent=2)
     os.chmod(CREDENTIALS_FILE, 0o600)  # Restrict permissions
     console.print(f"[green]Credentials saved to {CREDENTIALS_FILE}[/green]")
+
+
+class RulesLoadError(ValueError):
+    """Raised when a rule file cannot be loaded or validated."""
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Return a recursive merge without mutating either input."""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_structured_file(path: Path) -> dict[str, Any]:
+    suffix = path.suffix.lower()
+    try:
+        with open(path) as f:
+            if suffix in {".yaml", ".yml"}:
+                try:
+                    import yaml
+                except ImportError as exc:
+                    raise RulesLoadError(
+                        "YAML rule files require PyYAML. Install with: pip install PyYAML"
+                    ) from exc
+                data = yaml.safe_load(f) or {}
+            else:
+                data = json.load(f)
+    except FileNotFoundError as exc:
+        raise RulesLoadError(f"Rule file not found: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise RulesLoadError(f"Rule file is not valid JSON: {path} ({exc.msg})") from exc
+    except ValueError as exc:
+        raise RulesLoadError(f"Rule file could not be parsed: {path} ({exc})") from exc
+
+    if not isinstance(data, dict):
+        raise RulesLoadError(f"Rule file must contain an object at the top level: {path}")
+    return data
+
+
+def rules_from_app_config(app_config: Optional["AppConfig"]) -> RulesConfig:
+    """Build effective rule defaults from the active app config."""
+    if app_config is None:
+        return RulesConfig()
+
+    return RulesConfig(
+        currency=app_config.currency,
+        goals=app_config.goals,
+        campaign_strategy=app_config.campaign_strategy,
+        optimization=app_config.optimization,
+        bids=app_config.bids,
+        reporting=app_config.reporting,
+    )
+
+
+def load_rules(
+    path: Optional[Path] = None,
+    app_config: Optional["AppConfig"] = None,
+) -> RulesConfig:
+    """Load effective rules from app config plus an optional JSON/YAML override file."""
+    base = rules_from_app_config(app_config).model_dump(mode="json")
+
+    rule_path = path
+    if rule_path is None and RULES_FILE.exists():
+        rule_path = RULES_FILE
+
+    if rule_path is not None:
+        override = _load_structured_file(rule_path)
+        base = _deep_merge(base, override)
+
+    try:
+        return RulesConfig(**base)
+    except ValidationError as exc:
+        raise RulesLoadError(f"Rules failed validation: {exc}") from exc
+
+
+def cap_bid_change(current_bid: float, proposed_bid: float, rules: RulesConfig) -> float:
+    """Clamp a proposed bid to the configured percentage and absolute bid guardrails."""
+    if current_bid < 0 or proposed_bid < 0:
+        raise ValueError("Bid amounts must be non-negative")
+
+    max_delta = current_bid * (rules.bids.max_bid_change_pct / 100)
+    lower = max(0.0, current_bid - max_delta)
+    upper = current_bid + max_delta
+    capped = min(max(proposed_bid, lower), upper)
+
+    if rules.bids.min_bid is not None:
+        capped = max(capped, rules.bids.min_bid)
+    if rules.bids.max_bid is not None:
+        capped = min(capped, rules.bids.max_bid)
+    return round(capped, 2)
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,8 @@
 """Configuration commands."""
 
+import json
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -9,11 +12,13 @@ from rich.table import Table
 from ..config import (
     CONFIG_FILE,
     CREDENTIALS_FILE,
+    RulesConfig,
     get_active_app_config,
     get_app_slug,
     load_app_config,
     load_credentials,
     load_multi_app_config,
+    load_rules,
     prompt_for_app_config,
     prompt_for_credentials,
     save_app_config,
@@ -119,14 +124,47 @@ def show_config():
         table.add_row("Countries", ", ".join(app_config.default_countries))
         table.add_row("Default Bid", f"${app_config.default_bid}")
         table.add_row("CPA Goal", f"${app_config.default_cpa_goal}" if app_config.default_cpa_goal else "Not set")
+        table.add_row("Currency", app_config.currency)
+        table.add_row("Campaign Strategy", app_config.campaign_strategy.strategy)
+        table.add_row("Max Bid Change", f"{app_config.bids.max_bid_change_pct:g}%")
         table.add_row("Config File", str(CONFIG_FILE))
 
         console.print(table)
+
+        rules = load_rules(app_config=app_config)
+        console.print(
+            Panel(
+                "[bold]Effective Rules[/bold]\n"
+                f"CPA threshold: ${rules.optimization.cpa_threshold:g} | "
+                f"Min installs: {rules.optimization.min_installs} | "
+                f"Min spend: ${rules.optimization.min_spend:g} | "
+                f"Search terms days: {rules.reporting.search_terms_days}",
+                expand=False,
+            )
+        )
 
         if len(multi.apps) > 1:
             console.print(f"\n[dim]Showing active app. Run 'asa config list-apps' to see all {len(multi.apps)} apps.[/dim]")
     else:
         console.print("[yellow]  Not configured. Run 'asa config setup'.[/yellow]")
+
+
+@app.command("rules-template")
+def rules_template(
+    output: Path = typer.Option(Path("asa-rules.json"), "--output", "-o", help="Output path"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite an existing file"),
+):
+    """Write a generic JSON rule-file template."""
+    if output.exists() and not force:
+        console.print(f"[red]File already exists: {output}. Use --force to overwrite.[/red]")
+        raise typer.Exit(1)
+
+    template = RulesConfig().model_dump(mode="json")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w") as f:
+        json.dump(template, f, indent=2)
+        f.write("\n")
+    console.print(f"[green]Rules template written to {output}[/green]")
 
 
 @app.command("test")

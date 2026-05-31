@@ -1,0 +1,38 @@
+{
+  "currency": "USD",
+  "goals": {
+    "target_cpa": 5.0,
+    "target_roas": null,
+    "monthly_budget": null
+  },
+  "campaign_strategy": {
+    "strategy": "four_campaigns",
+    "search_results_only": true,
+    "one_country_per_campaign": true,
+    "discovery_search_match_enabled": false,
+    "campaign_types": [
+      "brand",
+      "category",
+      "competitor",
+      "discovery"
+    ]
+  },
+  "optimization": {
+    "cpa_threshold": 5.0,
+    "min_installs": 2,
+    "min_spend": 1.0,
+    "min_impressions": 0,
+    "loser_min_spend": null
+  },
+  "bids": {
+    "max_bid_change_pct": 25.0,
+    "min_bid": null,
+    "max_bid": null
+  },
+  "reporting": {
+    "summary_days": 30,
+    "search_terms_days": 14,
+    "min_impressions": 10,
+    "currency": "USD"
+  }
+}

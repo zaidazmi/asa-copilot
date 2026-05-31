@@ -34,6 +34,7 @@ venv.bak/
 uv.lock
 
 # IDE
+.DS_Store
 .idea/
 .vscode/
 *.swp
@@ -63,3 +64,9 @@ private-key*
 
 # Config files (contain credentials)
 credentials.json
+
+# Local CodeGraph index
+.codegraph/
+
+# Local fork notes
+docs/

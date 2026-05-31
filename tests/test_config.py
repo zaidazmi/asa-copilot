@@ -11,9 +11,12 @@ from asa_cli.config import (
     CAMPAIGN_STRUCTURE,
     CAMPAIGN_TYPE_NAMES,
     AppConfig,
+    BidRules,
     CampaignType,
     Credentials,
     MultiAppConfig,
+    RulesLoadError,
+    cap_bid_change,
     detect_campaign_type,
     get_active_app_config,
     get_app_slug,
@@ -22,6 +25,7 @@ from asa_cli.config import (
     load_app_config,
     load_credentials,
     load_multi_app_config,
+    load_rules,
     save_app_config,
     save_credentials,
     save_multi_app_config,
@@ -225,6 +229,11 @@ class TestAppConfig:
         config = AppConfig(app_id=123, app_name="TestApp")
         assert config.default_countries == ["US"]
         assert config.default_bid == 1.50
+        assert config.currency == "USD"
+        assert config.campaign_strategy.strategy == "four_campaigns"
+        assert config.optimization.cpa_threshold == 5.0
+        assert config.bids.max_bid_change_pct == 25.0
+        assert config.reporting.search_terms_days == 14
 
     def test_save_and_load_app_config(self):
         """Test saving and loading app config."""
@@ -255,6 +264,69 @@ class TestAppConfig:
             assert loaded.app_id == 123456789
             assert loaded.app_name == "TestApp"
             assert loaded.default_bid == 2.50
+
+
+class TestRulesConfig:
+    """Tests for generic rule loading and validation."""
+
+    def test_load_rules_from_app_config(self):
+        app_config = AppConfig(
+            app_id=123,
+            app_name="TestApp",
+            currency="gbp",
+            default_cpa_goal=4.0,
+        )
+        app_config.optimization.cpa_threshold = 4.0
+        app_config.bids.max_bid_change_pct = 10
+
+        rules = load_rules(app_config=app_config)
+
+        assert rules.currency == "GBP"
+        assert rules.optimization.cpa_threshold == 4.0
+        assert rules.bids.max_bid_change_pct == 10
+
+    def test_load_rules_json_override_merges_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = Path(tmpdir) / "rules.json"
+            rules_file.write_text(
+                json.dumps(
+                    {
+                        "optimization": {"cpa_threshold": 3.5, "min_installs": 1},
+                        "bids": {"max_bid_change_pct": 15},
+                    }
+                )
+            )
+
+            rules = load_rules(rules_file, app_config=AppConfig(app_id=123, app_name="TestApp"))
+
+            assert rules.optimization.cpa_threshold == 3.5
+            assert rules.optimization.min_installs == 1
+            assert rules.optimization.min_spend == 1.0
+            assert rules.bids.max_bid_change_pct == 15
+            assert rules.reporting.summary_days == 30
+
+    def test_load_rules_rejects_invalid_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = Path(tmpdir) / "rules.json"
+            rules_file.write_text(json.dumps({"bids": {"max_bid_change_pct": 150}}))
+
+            with pytest.raises(RulesLoadError):
+                load_rules(rules_file)
+
+    def test_bid_rules_validate_min_max(self):
+        with pytest.raises(ValueError):
+            BidRules(min_bid=2.0, max_bid=1.0)
+
+    def test_cap_bid_change_uses_percentage_and_absolute_limits(self):
+        app_config = AppConfig(app_id=123, app_name="TestApp")
+        app_config.bids.max_bid_change_pct = 20
+        app_config.bids.min_bid = 0.75
+        app_config.bids.max_bid = 2.0
+        rules = load_rules(app_config=app_config)
+
+        assert cap_bid_change(1.0, 2.0, rules) == 1.2
+        assert cap_bid_change(1.0, 0.1, rules) == 0.8
+        assert cap_bid_change(0.5, 0.1, rules) == 0.75
 
 
 class TestAppSlug:

@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -14,10 +15,21 @@ from ..api import SearchAdsClient
 from ..config import (
     CampaignType,
     MatchType,
+    RulesLoadError,
     detect_campaign_type,
     get_current_app_config,
     is_multi_app,
     load_credentials,
+    load_rules,
+)
+from ..plans import (
+    ChangePlan,
+    PlanAction,
+    PlanActionType,
+    apply_plan,
+    display_apply_result,
+    save_applied_plan,
+    save_plan,
 )
 
 app = typer.Typer(help="Automated campaign optimization")
@@ -331,10 +343,171 @@ def execute_negatives(
     return success_count, failure_count
 
 
+def _parse_lookback_days(lookback: str) -> int:
+    """Parse simple lookback strings like '14d' or '14'."""
+    value = lookback.strip().lower()
+    if value.endswith("d"):
+        value = value[:-1]
+    if not value.isdigit() or int(value) <= 0:
+        raise ValueError("Lookback must be a positive number of days, e.g. 14d")
+    return int(value)
+
+
+def _json_safe_metric(value):
+    """Return metrics in JSON-safe form, avoiding Infinity in plan files."""
+    if value == float("inf"):
+        return None
+    return value
+
+
+def _term_evidence(terms: list[dict]) -> list[dict]:
+    """Extract compact search-term evidence for plan metadata."""
+    evidence = []
+    for term in terms:
+        evidence.append(
+            {
+                "term": term.get("term"),
+                "source": term.get("source"),
+                "impressions": term.get("impressions", 0),
+                "taps": term.get("taps", 0),
+                "installs": term.get("installs", 0),
+                "spend": term.get("spend", 0),
+                "cpa": _json_safe_metric(term.get("cpa")),
+            }
+        )
+    return evidence
+
+
+def _summarize_term_evidence(terms: list[dict]) -> dict:
+    """Summarize metrics used to justify a plan action."""
+    installs = sum(term.get("installs", 0) for term in terms)
+    spend = sum(term.get("spend", 0) for term in terms)
+    taps = sum(term.get("taps", 0) for term in terms)
+    impressions = sum(term.get("impressions", 0) for term in terms)
+    return {
+        "term_count": len(terms),
+        "impressions": impressions,
+        "taps": taps,
+        "installs": installs,
+        "spend": spend,
+        "cpa": (spend / installs) if installs else None,
+    }
+
+
+def build_optimization_plan(
+    client: SearchAdsClient,
+    winners: list[dict],
+    losers: list[dict],
+    discovery_campaign: dict,
+    target_campaign: dict,
+    managed_campaigns: list[tuple[dict, CampaignType]],
+    days: int,
+    target_type: CampaignType,
+    app_name: Optional[str],
+) -> ChangePlan:
+    """Build a durable plan from optimization analysis."""
+    actions: list[PlanAction] = []
+    winner_terms = [w["term"] for w in winners]
+    loser_terms = [l["term"] for l in losers]
+    winner_evidence = _term_evidence(winners)
+    loser_evidence = _term_evidence(losers)
+
+    if winner_terms:
+        ad_groups = client.get_ad_groups(target_campaign.get("id"))
+        exact_ad_group = next(
+            (ag for ag in ad_groups if "Exact" in ag.get("name", "")),
+            ad_groups[0] if ad_groups else None,
+        )
+        if exact_ad_group:
+            actions.append(
+                PlanAction(
+                    type=PlanActionType.ADD_KEYWORDS,
+                    description=f"Promote {len(winner_terms)} discovery terms to exact keywords",
+                    campaign_id=target_campaign.get("id"),
+                    campaign_name=target_campaign.get("name"),
+                    ad_group_id=exact_ad_group.get("id"),
+                    ad_group_name=exact_ad_group.get("name"),
+                    keywords=winner_terms,
+                    match_type=MatchType.EXACT,
+                    reason=f"Search terms met winner criteria over {days} days",
+                    source="rule",
+                    before_metrics=_summarize_term_evidence(winners),
+                    metadata={
+                        "target_campaign_type": target_type.value,
+                        "search_terms": winner_evidence,
+                    },
+                )
+            )
+            actions.append(
+                PlanAction(
+                    type=PlanActionType.ADD_NEGATIVE_KEYWORDS,
+                    description=f"Add {len(winner_terms)} promoted terms as Discovery negatives",
+                    campaign_id=discovery_campaign.get("id"),
+                    campaign_name=discovery_campaign.get("name"),
+                    keywords=winner_terms,
+                    match_type=MatchType.EXACT,
+                    reason="Prevent duplicate spend after promotion",
+                    source="rule",
+                    before_metrics=_summarize_term_evidence(winners),
+                    metadata={
+                        "paired_with": "promotion",
+                        "search_terms": winner_evidence,
+                    },
+                )
+            )
+        else:
+            actions.append(
+                PlanAction(
+                    type=PlanActionType.CREATIVE_MAPPING_CHECK,
+                    description="Target campaign has no ad group for keyword promotion",
+                    campaign_id=target_campaign.get("id"),
+                    campaign_name=target_campaign.get("name"),
+                    reason="Optimization found winners but no target ad group exists",
+                    source="rule",
+                    before_metrics=_summarize_term_evidence(winners),
+                    metadata={"search_terms": winner_evidence},
+                )
+            )
+
+    if loser_terms:
+        for campaign, ctype in managed_campaigns:
+            actions.append(
+                PlanAction(
+                    type=PlanActionType.ADD_NEGATIVE_KEYWORDS,
+                    description=f"Block {len(loser_terms)} inefficient search terms",
+                    campaign_id=campaign.get("id"),
+                    campaign_name=campaign.get("name"),
+                    keywords=loser_terms,
+                    match_type=MatchType.EXACT,
+                    reason=f"Terms spent with no installs over {days} days",
+                    source="rule",
+                    before_metrics=_summarize_term_evidence(losers),
+                    metadata={
+                        "campaign_type": ctype.value,
+                        "search_terms": loser_evidence,
+                    },
+                )
+            )
+
+    return ChangePlan(
+        source="optimize",
+        app_name=app_name,
+        lookback_days=days,
+        summary=(
+            f"Promote {len(winner_terms)} terms to {target_type.value}; "
+            f"block {len(loser_terms)} inefficient terms across managed campaigns"
+        ),
+        actions=actions,
+    )
+
+
 @app.callback(invoke_without_command=True)
 def optimize_cmd(
     ctx: typer.Context,
     days: int = typer.Option(14, "--days", "-d", help="Days to analyze"),
+    lookback: Optional[str] = typer.Option(
+        None, "--lookback", help="Lookback window, e.g. 14d. Overrides --days."
+    ),
     cpa_threshold: float = typer.Option(
         5.00, "--cpa-threshold", "-c", help="Max CPA for winners (USD)"
     ),
@@ -365,6 +538,12 @@ def optimize_cmd(
     output_json: bool = typer.Option(
         False, "--json", help="Output results as JSON (implies --dry-run)"
     ),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Write proposed changes to a plan JSON file"
+    ),
+    rules_file: Optional[Path] = typer.Option(
+        None, "--rules", help="JSON or YAML rule file overriding app config defaults"
+    ),
 ):
     """Run automated optimization on Discovery campaign.
 
@@ -381,12 +560,44 @@ def optimize_cmd(
         asa optimize --days 7            # Analyze last 7 days
         asa optimize --cpa-threshold 3   # Stricter winner criteria
         asa optimize --auto-approve      # Skip confirmation
-        asa optimize --json              # Output as JSON
+        asa optimize --json              # Output plan as JSON
+        asa optimize --lookback 14d --out plan.json
         asa optimize --min-impressions 10  # Only terms with 10+ impressions
         asa optimize --exclude "test,demo" # Exclude specific terms
     """
     if ctx.invoked_subcommand is not None:
         return
+
+    app_config = get_current_app_config()
+    try:
+        rules = load_rules(rules_file, app_config=app_config)
+    except RulesLoadError as exc:
+        if output_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    if lookback:
+        try:
+            days = _parse_lookback_days(lookback)
+        except ValueError as exc:
+            if output_json:
+                print(json.dumps({"error": str(exc)}))
+            else:
+                console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+    elif days == 14:
+        days = rules.reporting.search_terms_days
+
+    if cpa_threshold == 5.00:
+        cpa_threshold = rules.optimization.cpa_threshold
+    if min_installs == 2:
+        min_installs = rules.optimization.min_installs
+    if min_spend == 1.00:
+        min_spend = rules.optimization.loser_min_spend or rules.optimization.min_spend
+    if min_impressions == 0:
+        min_impressions = rules.optimization.min_impressions
 
     # JSON output implies dry-run
     if output_json:
@@ -453,8 +664,11 @@ def optimize_cmd(
             f"Days: {days} | CPA Threshold: {format_currency(cpa_threshold)} | "
             f"Min Installs: {min_installs} | Min Spend: {format_currency(min_spend)}"
         )
+        settings_text += f" | Max Bid Change: {rules.bids.max_bid_change_pct:g}%"
         if min_impressions > 0:
             settings_text += f" | Min Impressions: {min_impressions}"
+        if rules_file:
+            settings_text += f"\nRules: {rules_file}"
         if exclude_list:
             settings_text += f"\nExcluding: {', '.join(exclude_list)}"
         console.print(Panel(settings_text, expand=False))
@@ -486,55 +700,31 @@ def optimize_cmd(
     winners = analysis.winners
     losers = analysis.losers
 
+    optimization_plan = build_optimization_plan(
+        client=client,
+        winners=winners,
+        losers=losers,
+        discovery_campaign=discovery_campaign,
+        target_campaign=target_campaign,
+        managed_campaigns=managed_campaigns,
+        days=days,
+        target_type=target_type,
+        app_name=app_name,
+    )
+    for action in optimization_plan.actions:
+        action.metadata.setdefault("rules", rules.model_dump(mode="json"))
+
     # JSON output mode
     if output_json:
-        output_data = {
-            "settings": {
-                "days": days,
-                "cpa_threshold": cpa_threshold,
-                "min_installs": min_installs,
-                "min_spend": min_spend,
-                "min_impressions": min_impressions,
-                "exclude_terms": exclude_list,
-                "target_campaign": target_type.value,
-            },
-            "campaigns": {
-                "discovery": {
-                    "id": discovery_campaign.get("id"),
-                    "name": discovery_campaign.get("name"),
-                },
-                "target": {
-                    "id": target_campaign.get("id"),
-                    "name": target_campaign.get("name"),
-                },
-            },
-            "analysis": {
-                "total_terms": analysis.total_terms,
-                "skipped_no_text": analysis.skipped_no_text,
-                "skipped_no_activity": analysis.skipped_no_activity,
-            },
-            "winners": [
-                {
-                    "term": w["term"],
-                    "installs": w["installs"],
-                    "spend": w["spend"],
-                    "cpa": w["cpa"] if w["cpa"] != float("inf") else None,
-                    "impressions": w["impressions"],
-                    "taps": w["taps"],
-                }
-                for w in winners
-            ],
-            "losers": [
-                {
-                    "term": l["term"],
-                    "spend": l["spend"],
-                    "impressions": l["impressions"],
-                    "taps": l["taps"],
-                }
-                for l in losers
-            ],
-        }
+        output_data = optimization_plan.model_dump(mode="json")
         print(json.dumps(output_data, indent=2))
+        return
+
+    if out:
+        save_plan(optimization_plan, out)
+        console.print(f"[green]Plan saved to {out}[/green]")
+        console.print("[dim]Review with: asa plan show {path}[/dim]".format(path=out))
+        console.print("[dim]Apply with: asa apply {path}[/dim]".format(path=out))
         return
 
     display_optimization_summary(
@@ -566,30 +756,7 @@ def optimize_cmd(
             console.print("[yellow]Cancelled.[/yellow]")
             return
 
-    console.print("\n[bold]Executing optimization...[/bold]\n")
-
-    promoted = failed_promo = 0
-    neg_success = neg_failed = 0
-
-    if winners:
-        promoted, failed_promo = execute_promotions(
-            client, winners, target_campaign, discovery_campaign
-        )
-
-    if losers:
-        neg_success, neg_failed = execute_negatives(client, losers, managed_campaigns)
-
-    console.print("\n[bold green]Optimization complete![/bold green]")
-
-    summary_parts = []
-    if promoted > 0:
-        summary_parts.append(f"{promoted} keywords promoted to {target_type.value}")
-    if neg_success > 0:
-        summary_parts.append(f"{len(losers)} terms blocked across {neg_success} campaigns")
-
-    if summary_parts:
-        console.print(f"Summary: {' • '.join(summary_parts)}")
-
-    if failed_promo > 0 or neg_failed > 0:
-        console.print(f"[yellow]Failures: {failed_promo} promotions, {neg_failed} campaign blocks[/yellow]")
-
+    console.print("\n[bold]Executing optimization plan...[/bold]\n")
+    result = apply_plan(client, optimization_plan)
+    save_applied_plan(optimization_plan, result)
+    display_apply_result(result)

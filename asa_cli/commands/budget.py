@@ -1,6 +1,7 @@
 """Budget management commands."""
 
 from typing import Optional
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -8,7 +9,14 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..api import SearchAdsClient
-from ..config import detect_campaign_type, get_current_app_config, is_multi_app, load_credentials
+from ..config import (
+    RulesLoadError,
+    detect_campaign_type,
+    get_current_app_config,
+    is_multi_app,
+    load_credentials,
+    load_rules,
+)
 
 app = typer.Typer(help="Budget management commands")
 console = Console()
@@ -103,11 +111,21 @@ def get_budget_order(
 
 
 @app.command("status")
-def budget_status():
+def budget_status(
+    rules_file: Optional[Path] = typer.Option(
+        None, "--rules", help="JSON or YAML rule file overriding app config defaults"
+    ),
+):
     """Campaign budget health dashboard."""
     credentials = load_credentials()
     if not credentials:
         console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+    app_config = get_current_app_config()
+    try:
+        rules = load_rules(rules_file, app_config=app_config)
+    except RulesLoadError as exc:
+        console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
@@ -119,6 +137,15 @@ def budget_status():
     if not statuses:
         console.print("[yellow]No campaigns found.[/yellow]")
         return
+
+    if rules.goals.monthly_budget is not None:
+        console.print(
+            Panel(
+                f"[bold]Budget Rules[/bold]\n"
+                f"Monthly budget: ${rules.goals.monthly_budget:,.2f} {rules.currency}",
+                expand=False,
+            )
+        )
 
     # Filter to current app if multi-app
     if app_name:

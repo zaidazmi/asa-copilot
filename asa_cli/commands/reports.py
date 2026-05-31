@@ -1,6 +1,7 @@
 """Reporting commands."""
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -9,7 +10,15 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..api import SearchAdsClient
-from ..config import CampaignType, get_current_app_config, is_multi_app, load_credentials, parse_campaign_name
+from ..config import (
+    CampaignType,
+    RulesLoadError,
+    get_current_app_config,
+    is_multi_app,
+    load_credentials,
+    load_rules,
+    parse_campaign_name,
+)
 
 app = typer.Typer(help="Reporting and analytics commands")
 console = Console()
@@ -61,12 +70,23 @@ def report_summary(
     all_campaigns: bool = typer.Option(
         True, "--all/--managed-only", "-a", help="Include all campaigns (default) or only managed"
     ),
+    rules_file: Optional[Path] = typer.Option(
+        None, "--rules", help="JSON or YAML rule file overriding app config defaults"
+    ),
 ):
     """Show performance summary across all campaigns."""
     credentials = load_credentials()
     if not credentials:
         console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
+    app_config = get_current_app_config()
+    try:
+        rules = load_rules(rules_file, app_config=app_config)
+    except RulesLoadError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if days == 30:
+        days = rules.reporting.summary_days
 
     client = SearchAdsClient(credentials)
 
@@ -699,12 +719,25 @@ def report_search_terms(
     show_winners: bool = typer.Option(False, "--winners", "-w", help="Show potential keywords to promote"),
     show_negatives: bool = typer.Option(False, "--negatives", "-n", help="Show potential negative keywords"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max terms to show"),
+    rules_file: Optional[Path] = typer.Option(
+        None, "--rules", help="JSON or YAML rule file overriding app config defaults"
+    ),
 ):
     """Show search terms report - discover new keywords and negatives."""
     credentials = load_credentials()
     if not credentials:
         console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
+    app_config = get_current_app_config()
+    try:
+        rules = load_rules(rules_file, app_config=app_config)
+    except RulesLoadError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if days == 14:
+        days = rules.reporting.search_terms_days
+    if min_impressions == 10:
+        min_impressions = rules.reporting.min_impressions
 
     client = SearchAdsClient(credentials)
 
@@ -1366,4 +1399,3 @@ def report_bid_recommendations(
         )
     else:
         console.print("[yellow]No keyword bid data found.[/yellow]")
-
