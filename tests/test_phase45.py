@@ -16,8 +16,8 @@ from asa_cli.plans import PlanActionType
 def test_guide_hygiene_pauses_duplicates_and_adds_discovery_negatives():
     client = MagicMock()
     campaigns = [
-        {"id": 1, "name": "Noteo - Discovery - US", "countriesOrRegions": ["US"]},
-        {"id": 2, "name": "Noteo - Category - US", "countriesOrRegions": ["US"]},
+        {"id": 1, "name": "AppBeta - Discovery - US", "countriesOrRegions": ["US"]},
+        {"id": 2, "name": "AppBeta - Category - US", "countriesOrRegions": ["US"]},
     ]
 
     client.get_ad_groups.side_effect = lambda campaign_id: {
@@ -35,7 +35,7 @@ def test_guide_hygiene_pauses_duplicates_and_adds_discovery_negatives():
     }[(campaign_id, ad_group_id)]
     client.get_negative_keywords.return_value = []
 
-    rules = load_rules(app_config=AppConfig(app_id=123, app_name="Noteo"))
+    rules = load_rules(app_config=AppConfig(app_id=123, app_name="AppBeta"))
 
     actions = build_guide_hygiene_actions(client, campaigns, app_name=None, rules=rules)
 
@@ -56,10 +56,10 @@ def test_guide_hygiene_pauses_duplicates_and_adds_discovery_negatives():
 def test_guide_hygiene_scopes_duplicates_and_negatives_by_country():
     client = MagicMock()
     campaigns = [
-        {"id": 1, "name": "Noteo - Discovery - US", "countriesOrRegions": ["US"]},
-        {"id": 2, "name": "Noteo - Discovery - AU", "countriesOrRegions": ["AU"]},
-        {"id": 3, "name": "Noteo - Category - US", "countriesOrRegions": ["US"]},
-        {"id": 4, "name": "Noteo - Category - AU", "countriesOrRegions": ["AU"]},
+        {"id": 1, "name": "AppBeta - Discovery - US", "countriesOrRegions": ["US"]},
+        {"id": 2, "name": "AppBeta - Discovery - AU", "countriesOrRegions": ["AU"]},
+        {"id": 3, "name": "AppBeta - Category - US", "countriesOrRegions": ["US"]},
+        {"id": 4, "name": "AppBeta - Category - AU", "countriesOrRegions": ["AU"]},
     ]
 
     client.get_ad_groups.side_effect = lambda campaign_id: {
@@ -82,7 +82,7 @@ def test_guide_hygiene_scopes_duplicates_and_negatives_by_country():
     }[(campaign_id, ad_group_id)]
     client.get_negative_keywords.return_value = []
 
-    rules = load_rules(app_config=AppConfig(app_id=123, app_name="Noteo"))
+    rules = load_rules(app_config=AppConfig(app_id=123, app_name="AppBeta"))
 
     actions = build_guide_hygiene_actions(client, campaigns, app_name=None, rules=rules)
 
@@ -101,9 +101,9 @@ def test_guide_hygiene_scopes_duplicates_and_negatives_by_country():
 def test_guide_hygiene_flags_duplicates_when_country_scopes_overlap():
     client = MagicMock()
     campaigns = [
-        {"id": 1, "name": "Noteo - Category - US+AU", "countriesOrRegions": ["US", "AU"]},
-        {"id": 2, "name": "Noteo - Category - US", "countriesOrRegions": ["US"]},
-        {"id": 3, "name": "Noteo - Category - NZ", "countriesOrRegions": ["NZ"]},
+        {"id": 1, "name": "AppBeta - Category - US+AU", "countriesOrRegions": ["US", "AU"]},
+        {"id": 2, "name": "AppBeta - Category - US", "countriesOrRegions": ["US"]},
+        {"id": 3, "name": "AppBeta - Category - NZ", "countriesOrRegions": ["NZ"]},
     ]
 
     client.get_ad_groups.side_effect = lambda campaign_id: {
@@ -124,7 +124,7 @@ def test_guide_hygiene_flags_duplicates_when_country_scopes_overlap():
     }[(campaign_id, ad_group_id)]
     client.get_negative_keywords.return_value = []
 
-    rules = load_rules(app_config=AppConfig(app_id=123, app_name="Noteo"))
+    rules = load_rules(app_config=AppConfig(app_id=123, app_name="AppBeta"))
 
     actions = build_guide_hygiene_actions(client, campaigns, app_name=None, rules=rules)
 

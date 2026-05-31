@@ -241,10 +241,10 @@ def test_apply_plan_campaign_pause_and_enable_actions():
 def test_apply_plan_rejects_plan_for_different_active_app():
     """Plan-level app_id prevents applying a plan under the wrong app."""
     client = MagicMock()
-    client.app_config = AppConfig(app_id=111, app_name="Lofto")
+    client.app_config = AppConfig(app_id=111, app_name="AppAlpha")
     plan = ChangePlan(
         app_id=222,
-        app_name="Noteo",
+        app_name="AppBeta",
         actions=[
             PlanAction(
                 type=PlanActionType.PAUSE_CAMPAIGN,
@@ -268,8 +268,8 @@ def test_apply_plan_rejects_plan_for_different_active_app():
 def test_apply_plan_rejects_action_campaign_outside_active_app():
     """Old plans without app_id still validate each campaign before mutation."""
     client = MagicMock()
-    client.app_config = AppConfig(app_id=111, app_name="Lofto")
-    client.get_campaign.return_value = {"id": 123, "name": "Noteo - Category", "adamId": 222}
+    client.app_config = AppConfig(app_id=111, app_name="AppAlpha")
+    client.get_campaign.return_value = {"id": 123, "name": "AppBeta - Category", "adamId": 222}
     plan = ChangePlan(
         actions=[
             PlanAction(

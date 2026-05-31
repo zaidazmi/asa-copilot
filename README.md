@@ -95,6 +95,8 @@ Local state lives in `~/.asa-cli/`:
 └── decision-log.jsonl    # Reasons behind every change
 ```
 
+The repository does not require app-specific files. Configure your own iOS apps with `asa config setup` or `asa config add-app`; credentials, app IDs, campaign IDs, and decision logs stay in local `~/.asa-cli/` files outside git.
+
 ### API credentials
 
 In Apple Ads: Account Settings → API. Create an API user, upload your public key, and collect the org ID, client ID, team ID, key ID, and private key path.
@@ -292,13 +294,13 @@ Keep high-value exact terms controlled, use Discovery to learn, and avoid biddin
 ```bash
 asa config add-app
 asa config list-apps
-asa config switch noteo
+asa config switch myapp
 
-asa --app noteo campaigns list --all
-asa --app lofto search-terms mine --out lofto-plan.json
+asa --app myapp campaigns list --all
+asa --app secondapp search-terms mine --out secondapp-plan.json
 ```
 
-`--app` accepts the stored slug or a unique normalized fragment of the app name, so short selectors like `noteo` and `lofto` work when they match only one configured app.
+`--app` accepts the stored slug or a unique normalized fragment of the app name, so short selectors like `myapp` and `secondapp` work when they match only one configured app.
 
 ---
 

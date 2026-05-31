@@ -11,10 +11,10 @@ from asa_cli.config import AppConfig
 
 def test_require_campaign_in_current_app_allows_matching_adam_id(monkeypatch):
     client = Mock()
-    client.get_campaign.return_value = {"id": 1, "name": "Lofto - Category", "adamId": 123}
+    client.get_campaign.return_value = {"id": 1, "name": "AppAlpha - Category", "adamId": 123}
     monkeypatch.setattr(
         "asa_cli.commands.scope.get_current_app_config",
-        lambda: AppConfig(app_id=123, app_name="Lofto"),
+        lambda: AppConfig(app_id=123, app_name="AppAlpha"),
     )
 
     campaign = require_campaign_in_current_app(client, 1)
@@ -24,10 +24,10 @@ def test_require_campaign_in_current_app_allows_matching_adam_id(monkeypatch):
 
 def test_require_campaign_in_current_app_blocks_other_app(monkeypatch):
     client = Mock()
-    client.get_campaign.return_value = {"id": 1, "name": "Noteo - Category", "adamId": 456}
+    client.get_campaign.return_value = {"id": 1, "name": "AppBeta - Category", "adamId": 456}
     monkeypatch.setattr(
         "asa_cli.commands.scope.get_current_app_config",
-        lambda: AppConfig(app_id=123, app_name="Lofto"),
+        lambda: AppConfig(app_id=123, app_name="AppAlpha"),
     )
 
     with pytest.raises(typer.Exit):
@@ -39,7 +39,7 @@ def test_require_campaign_in_current_app_blocks_missing_campaign(monkeypatch):
     client.get_campaign.return_value = None
     monkeypatch.setattr(
         "asa_cli.commands.scope.get_current_app_config",
-        lambda: AppConfig(app_id=123, app_name="Lofto"),
+        lambda: AppConfig(app_id=123, app_name="AppAlpha"),
     )
 
     with pytest.raises(typer.Exit):

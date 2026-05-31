@@ -24,7 +24,7 @@ def test_bid_recommendations_json_is_non_interactive():
     runner = CliRunner()
     client = MagicMock()
     client.get_campaigns.return_value = [
-        {"id": 123, "name": "Noteo - Category - US", "adamId": 999}
+        {"id": 123, "name": "AppBeta - Category - US", "adamId": 999}
     ]
     client.get_ad_groups.return_value = [{"id": 456, "name": "Category-Exact"}]
     client.get_keywords.return_value = [
@@ -36,7 +36,7 @@ def test_bid_recommendations_json_is_non_interactive():
         patch("asa_cli.commands.reports.load_credentials", return_value=_credentials()),
         patch(
             "asa_cli.commands.reports.get_current_app_config",
-            return_value=AppConfig(app_id=999, app_name="Noteo"),
+            return_value=AppConfig(app_id=999, app_name="AppBeta"),
         ),
         patch("asa_cli.commands.reports.SearchAdsClient", return_value=client),
     ):
@@ -54,7 +54,7 @@ def test_bid_recommendations_out_is_non_interactive(tmp_path):
     runner = CliRunner()
     client = MagicMock()
     client.get_campaigns.return_value = [
-        {"id": 123, "name": "Noteo - Category - US", "adamId": 999}
+        {"id": 123, "name": "AppBeta - Category - US", "adamId": 999}
     ]
     client.get_ad_groups.return_value = []
     out = tmp_path / "bid-plan.json"
@@ -63,7 +63,7 @@ def test_bid_recommendations_out_is_non_interactive(tmp_path):
         patch("asa_cli.commands.reports.load_credentials", return_value=_credentials()),
         patch(
             "asa_cli.commands.reports.get_current_app_config",
-            return_value=AppConfig(app_id=999, app_name="Noteo"),
+            return_value=AppConfig(app_id=999, app_name="AppBeta"),
         ),
         patch("asa_cli.commands.reports.SearchAdsClient", return_value=client),
     ):

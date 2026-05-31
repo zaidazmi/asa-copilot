@@ -257,7 +257,7 @@ def resolve_app_slug(selector: str) -> str:
     """Resolve an app selector to a configured app slug.
 
     Accepts exact slugs plus unique normalized fragments from the slug or app
-    name, so operators can use short selectors like ``--app noteo`` when the
+    name, so operators can use short selectors like ``--app myapp`` when the
     stored slug is generated from the full App Store name.
     """
     multi = load_multi_app_config()

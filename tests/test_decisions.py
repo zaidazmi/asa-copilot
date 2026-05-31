@@ -20,7 +20,7 @@ def test_log_manual_decision_writes_jsonl(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("asa_cli.decisions.DECISION_LOG_FILE", path)
     monkeypatch.setattr(
         "asa_cli.decisions.get_current_app_config",
-        lambda: AppConfig(app_id=111, app_name="Lofto"),
+        lambda: AppConfig(app_id=111, app_name="AppAlpha"),
     )
 
     record = log_manual_decision(
@@ -36,7 +36,7 @@ def test_log_manual_decision_writes_jsonl(tmp_path: Path, monkeypatch):
     assert raw["event_type"] == "campaign_paused"
     assert raw["reason"] == "Poor CPA after 14 day test"
     assert raw["app_id"] == 111
-    assert raw["app_name"] == "Lofto"
+    assert raw["app_name"] == "AppAlpha"
 
 
 def test_log_manual_decision_accepts_keyword_context(tmp_path: Path, monkeypatch):
@@ -79,7 +79,7 @@ def test_log_applied_plan_decisions_copies_action_reason_and_result(tmp_path: Pa
         id="plan-1",
         source="test",
         app_id=111,
-        app_name="Lofto",
+        app_name="AppAlpha",
         actions=[
             PlanAction(
                 id="action-1",
@@ -106,15 +106,15 @@ def test_log_applied_plan_decisions_copies_action_reason_and_result(tmp_path: Pa
         ],
     )
 
-    log_applied_plan_decisions(plan, result, approval_note="Approved by Zaid", path=path)
+    log_applied_plan_decisions(plan, result, approval_note="Approved by operator", path=path)
     loaded = load_decisions(path)
 
     assert len(loaded) == 1
     assert loaded[0].plan_id == "plan-1"
     assert loaded[0].app_id == 111
-    assert loaded[0].app_name == "Lofto"
+    assert loaded[0].app_name == "AppAlpha"
     assert loaded[0].reason == "Campaign is capped with good CPA"
-    assert loaded[0].note == "Approved by Zaid"
+    assert loaded[0].note == "Approved by operator"
     assert loaded[0].evidence["spend_pace"] == 0.95
     assert loaded[0].result["success"] is True
 
@@ -124,7 +124,7 @@ def test_decisions_to_markdown_contains_reasons():
         event_type="campaign_paused",
         reason="Duplicate campaign structure",
         app_id=111,
-        app_name="Lofto",
+        app_name="AppAlpha",
         campaign_id=123,
         campaign_name="Discovery",
     )
@@ -133,5 +133,5 @@ def test_decisions_to_markdown_contains_reasons():
 
     assert "ASA Decision Log" in markdown
     assert "Duplicate campaign structure" in markdown
-    assert "Lofto (111)" in markdown
+    assert "AppAlpha (111)" in markdown
     assert "Discovery" in markdown

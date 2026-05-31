@@ -143,10 +143,10 @@ class TestCampaignTypeDetection:
 
     def test_campaign_app_filter_prefers_adam_id_over_name(self):
         """App scoping should not depend on full app names in campaign names."""
-        app = AppConfig(app_id=6751567888, app_name="Lofto: AI Interior Design")
+        app = AppConfig(app_id=1111111111, app_name="AppAlpha: AI Interior Design")
         campaigns = [
-            {"id": 1, "name": "Lofto - Category - Exact - US", "adamId": 6751567888},
-            {"id": 2, "name": "Noteo - Category - Exact - US", "adamId": 6752323774},
+            {"id": 1, "name": "AppAlpha - Category - Exact - US", "adamId": 1111111111},
+            {"id": 2, "name": "AppBeta - Category - Exact - US", "adamId": 2222222222},
         ]
 
         assert campaign_matches_app(campaigns[0], app) is True
@@ -527,15 +527,15 @@ class TestMultiAppConfig:
             config_file = config_dir / "config.json"
 
             config = MultiAppConfig(
-                active_app="loftoaiinteriordesign",
+                active_app="appalphaaiinteriordesign",
                 apps={
-                    "ainotetakernoteo": AppConfig(
+                    "ainotetakerappbeta": AppConfig(
                         app_id=123,
-                        app_name="AI Note Taker : Noteo",
+                        app_name="AI Note Taker : AppBeta",
                     ),
-                    "loftoaiinteriordesign": AppConfig(
+                    "appalphaaiinteriordesign": AppConfig(
                         app_id=456,
-                        app_name="Lofto: AI Interior Design",
+                        app_name="AppAlpha: AI Interior Design",
                     ),
                 },
             )
@@ -545,8 +545,8 @@ class TestMultiAppConfig:
                     save_multi_app_config(config)
 
             with patch("asa_cli.config.CONFIG_FILE", config_file):
-                assert resolve_app_slug("noteo") == "ainotetakernoteo"
-                assert resolve_app_slug("lofto") == "loftoaiinteriordesign"
+                assert resolve_app_slug("appbeta") == "ainotetakerappbeta"
+                assert resolve_app_slug("appalpha") == "appalphaaiinteriordesign"
 
     def test_app_selector_rejects_unknown_slug(self):
         """Unknown app selectors fail instead of silently falling back."""
