@@ -311,13 +311,18 @@ def _load_structured_file(path: Path) -> dict[str, Any]:
                     raise RulesLoadError(
                         "YAML rule files require PyYAML. Install with: pip install PyYAML"
                     ) from exc
-                data = yaml.safe_load(f) or {}
+                try:
+                    data = yaml.safe_load(f) or {}
+                except yaml.YAMLError as exc:
+                    raise RulesLoadError(f"Rule file is not valid YAML: {path} ({exc})") from exc
             else:
                 data = json.load(f)
     except FileNotFoundError as exc:
         raise RulesLoadError(f"Rule file not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise RulesLoadError(f"Rule file is not valid JSON: {path} ({exc.msg})") from exc
+    except RulesLoadError:
+        raise
     except ValueError as exc:
         raise RulesLoadError(f"Rule file could not be parsed: {path} ({exc})") from exc
 

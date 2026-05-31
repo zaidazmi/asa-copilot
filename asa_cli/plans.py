@@ -103,7 +103,7 @@ def load_plan(path: Path) -> ChangePlan:
         raise PlanLoadError(f"Plan file not found: {path}") from exc
     except JSONDecodeError as exc:
         raise PlanLoadError(f"Plan file is not valid JSON: {path} ({exc.msg})") from exc
-    except ValidationError as exc:
+    except (TypeError, ValidationError) as exc:
         raise PlanLoadError(f"Plan file does not match the plan schema: {path} ({exc})") from exc
 
 

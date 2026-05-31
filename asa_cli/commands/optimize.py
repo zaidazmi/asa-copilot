@@ -15,6 +15,7 @@ from ..api import SearchAdsClient
 from ..config import (
     CampaignType,
     MatchType,
+    RulesConfig,
     RulesLoadError,
     detect_campaign_type,
     get_current_app_config,
@@ -353,6 +354,41 @@ def _parse_lookback_days(lookback: str) -> int:
     return int(value)
 
 
+def resolve_optimization_settings(
+    *,
+    days: Optional[int],
+    lookback: Optional[str],
+    cpa_threshold: Optional[float],
+    min_installs: Optional[int],
+    min_spend: Optional[float],
+    min_impressions: Optional[int],
+    rules: RulesConfig,
+) -> tuple[int, float, int, float, int]:
+    """Resolve CLI options over rule defaults for optimization analysis."""
+    if lookback:
+        resolved_days = _parse_lookback_days(lookback)
+    elif days is not None:
+        resolved_days = days
+    else:
+        resolved_days = rules.reporting.search_terms_days
+
+    if resolved_days <= 0:
+        raise ValueError("Days must be a positive integer")
+
+    resolved_cpa = cpa_threshold if cpa_threshold is not None else rules.optimization.cpa_threshold
+    resolved_installs = min_installs if min_installs is not None else rules.optimization.min_installs
+    resolved_spend = (
+        min_spend
+        if min_spend is not None
+        else rules.optimization.loser_min_spend or rules.optimization.min_spend
+    )
+    resolved_impressions = (
+        min_impressions if min_impressions is not None else rules.optimization.min_impressions
+    )
+
+    return resolved_days, resolved_cpa, resolved_installs, resolved_spend, resolved_impressions
+
+
 def _json_safe_metric(value):
     """Return metrics in JSON-safe form, avoiding Infinity in plan files."""
     if value == float("inf"):
@@ -504,21 +540,21 @@ def build_optimization_plan(
 @app.callback(invoke_without_command=True)
 def optimize_cmd(
     ctx: typer.Context,
-    days: int = typer.Option(14, "--days", "-d", help="Days to analyze"),
+    days: Optional[int] = typer.Option(None, "--days", "-d", help="Days to analyze"),
     lookback: Optional[str] = typer.Option(
         None, "--lookback", help="Lookback window, e.g. 14d. Overrides --days."
     ),
-    cpa_threshold: float = typer.Option(
-        5.00, "--cpa-threshold", "-c", help="Max CPA for winners (USD)"
+    cpa_threshold: Optional[float] = typer.Option(
+        None, "--cpa-threshold", "-c", help="Max CPA for winners (USD)"
     ),
-    min_installs: int = typer.Option(
-        2, "--min-installs", "-i", help="Min installs to promote"
+    min_installs: Optional[int] = typer.Option(
+        None, "--min-installs", "-i", help="Min installs to promote"
     ),
-    min_spend: float = typer.Option(
-        1.00, "--min-spend", "-s", help="Min spend to consider blocking (USD)"
+    min_spend: Optional[float] = typer.Option(
+        None, "--min-spend", "-s", help="Min spend to consider blocking (USD)"
     ),
-    min_impressions: int = typer.Option(
-        0, "--min-impressions", help="Min impressions to consider a term"
+    min_impressions: Optional[int] = typer.Option(
+        None, "--min-impressions", help="Min impressions to consider a term"
     ),
     exclude_terms: Optional[str] = typer.Option(
         None, "--exclude", "-e", help="Comma-separated terms to exclude from analysis"
@@ -578,26 +614,24 @@ def optimize_cmd(
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
-    if lookback:
-        try:
-            days = _parse_lookback_days(lookback)
-        except ValueError as exc:
-            if output_json:
-                print(json.dumps({"error": str(exc)}))
-            else:
-                console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
-    elif days == 14:
-        days = rules.reporting.search_terms_days
-
-    if cpa_threshold == 5.00:
-        cpa_threshold = rules.optimization.cpa_threshold
-    if min_installs == 2:
-        min_installs = rules.optimization.min_installs
-    if min_spend == 1.00:
-        min_spend = rules.optimization.loser_min_spend or rules.optimization.min_spend
-    if min_impressions == 0:
-        min_impressions = rules.optimization.min_impressions
+    try:
+        days, cpa_threshold, min_installs, min_spend, min_impressions = (
+            resolve_optimization_settings(
+                days=days,
+                lookback=lookback,
+                cpa_threshold=cpa_threshold,
+                min_installs=min_installs,
+                min_spend=min_spend,
+                min_impressions=min_impressions,
+                rules=rules,
+            )
+        )
+    except ValueError as exc:
+        if output_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
 
     # JSON output implies dry-run
     if output_json:

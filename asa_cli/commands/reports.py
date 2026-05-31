@@ -64,7 +64,7 @@ def get_campaign_type_label(campaign_name: str, app_name: Optional[str] = None) 
 
 @app.command("summary")
 def report_summary(
-    days: int = typer.Option(30, "--days", "-d", help="Number of days to report"),
+    days: Optional[int] = typer.Option(None, "--days", "-d", help="Number of days to report"),
     start_date: Optional[str] = typer.Option(None, "--start", help="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = typer.Option(None, "--end", help="End date (YYYY-MM-DD)"),
     all_campaigns: bool = typer.Option(
@@ -85,8 +85,11 @@ def report_summary(
     except RulesLoadError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
-    if days == 30:
+    if days is None:
         days = rules.reporting.summary_days
+    if days <= 0:
+        console.print("[red]Days must be a positive integer.[/red]")
+        raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
 
@@ -714,8 +717,10 @@ def report_impression_share(
 @app.command("search-terms")
 def report_search_terms(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
-    days: int = typer.Option(14, "--days", "-d", help="Number of days"),
-    min_impressions: int = typer.Option(10, "--min-impressions", help="Minimum impressions filter"),
+    days: Optional[int] = typer.Option(None, "--days", "-d", help="Number of days"),
+    min_impressions: Optional[int] = typer.Option(
+        None, "--min-impressions", help="Minimum impressions filter"
+    ),
     show_winners: bool = typer.Option(False, "--winners", "-w", help="Show potential keywords to promote"),
     show_negatives: bool = typer.Option(False, "--negatives", "-n", help="Show potential negative keywords"),
     limit: int = typer.Option(50, "--limit", "-l", help="Max terms to show"),
@@ -734,10 +739,16 @@ def report_search_terms(
     except RulesLoadError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
-    if days == 14:
+    if days is None:
         days = rules.reporting.search_terms_days
-    if min_impressions == 10:
+    if min_impressions is None:
         min_impressions = rules.reporting.min_impressions
+    if days <= 0:
+        console.print("[red]Days must be a positive integer.[/red]")
+        raise typer.Exit(1)
+    if min_impressions < 0:
+        console.print("[red]Minimum impressions must be zero or greater.[/red]")
+        raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
 

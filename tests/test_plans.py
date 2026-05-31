@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from asa_cli.config import CampaignType, MatchType
+from asa_cli.config import AppConfig, CampaignType, MatchType, load_rules
 from asa_cli.plans import (
     ChangePlan,
     PlanAction,
@@ -15,7 +15,7 @@ from asa_cli.plans import (
     save_applied_plan,
     save_plan,
 )
-from asa_cli.commands.optimize import build_optimization_plan
+from asa_cli.commands.optimize import build_optimization_plan, resolve_optimization_settings
 
 
 def test_plan_round_trip(tmp_path: Path):
@@ -72,6 +72,19 @@ def test_load_plan_invalid_schema_raises_plan_load_error(tmp_path: Path):
     """Invalid plan schema raises a clean domain error."""
     path = tmp_path / "bad-schema.json"
     path.write_text('{"actions": [{"type": "not_real", "description": "Bad"}]}')
+
+    try:
+        load_plan(path)
+    except PlanLoadError as exc:
+        assert "does not match the plan schema" in str(exc)
+    else:
+        raise AssertionError("Expected PlanLoadError")
+
+
+def test_load_plan_top_level_array_raises_plan_load_error(tmp_path: Path):
+    """JSON with the wrong top-level shape raises a clean domain error."""
+    path = tmp_path / "bad-shape.json"
+    path.write_text("[]")
 
     try:
         load_plan(path)
@@ -195,3 +208,49 @@ def test_build_optimization_plan_creates_promotion_and_negative_actions():
     assert plan.actions[2].keywords == ["free games"]
     assert plan.actions[2].before_metrics["term_count"] == 1
     assert plan.actions[2].metadata["search_terms"][0]["term"] == "free games"
+
+
+def test_resolve_optimization_settings_uses_rules_only_when_option_missing():
+    """Explicit CLI values must win even when they equal old hard-coded defaults."""
+    app_config = AppConfig(app_id=123, app_name="TestApp")
+    app_config.reporting.search_terms_days = 30
+    app_config.optimization.cpa_threshold = 2.0
+    app_config.optimization.min_installs = 5
+    app_config.optimization.min_spend = 10.0
+    app_config.optimization.min_impressions = 25
+    rules = load_rules(app_config=app_config)
+
+    resolved = resolve_optimization_settings(
+        days=14,
+        lookback=None,
+        cpa_threshold=5.0,
+        min_installs=2,
+        min_spend=1.0,
+        min_impressions=0,
+        rules=rules,
+    )
+
+    assert resolved == (14, 5.0, 2, 1.0, 0)
+
+
+def test_resolve_optimization_settings_falls_back_to_rules():
+    """Missing CLI values inherit the active rules."""
+    app_config = AppConfig(app_id=123, app_name="TestApp")
+    app_config.reporting.search_terms_days = 21
+    app_config.optimization.cpa_threshold = 3.0
+    app_config.optimization.min_installs = 1
+    app_config.optimization.min_spend = 2.5
+    app_config.optimization.min_impressions = 8
+    rules = load_rules(app_config=app_config)
+
+    resolved = resolve_optimization_settings(
+        days=None,
+        lookback=None,
+        cpa_threshold=None,
+        min_installs=None,
+        min_spend=None,
+        min_impressions=None,
+        rules=rules,
+    )
+
+    assert resolved == (21, 3.0, 1, 2.5, 8)

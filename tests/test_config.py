@@ -313,6 +313,16 @@ class TestRulesConfig:
             with pytest.raises(RulesLoadError):
                 load_rules(rules_file)
 
+    def test_load_rules_malformed_yaml_raises_rules_load_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rules_file = Path(tmpdir) / "rules.yaml"
+            rules_file.write_text("optimization: [not valid")
+
+            with pytest.raises(RulesLoadError) as exc:
+                load_rules(rules_file)
+
+            assert "not valid YAML" in str(exc.value)
+
     def test_bid_rules_validate_min_max(self):
         with pytest.raises(ValueError):
             BidRules(min_bid=2.0, max_bid=1.0)

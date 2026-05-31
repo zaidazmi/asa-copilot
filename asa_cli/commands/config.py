@@ -13,6 +13,7 @@ from ..config import (
     CONFIG_FILE,
     CREDENTIALS_FILE,
     RulesConfig,
+    RulesLoadError,
     get_active_app_config,
     get_app_slug,
     load_app_config,
@@ -131,17 +132,21 @@ def show_config():
 
         console.print(table)
 
-        rules = load_rules(app_config=app_config)
-        console.print(
-            Panel(
-                "[bold]Effective Rules[/bold]\n"
-                f"CPA threshold: ${rules.optimization.cpa_threshold:g} | "
-                f"Min installs: {rules.optimization.min_installs} | "
-                f"Min spend: ${rules.optimization.min_spend:g} | "
-                f"Search terms days: {rules.reporting.search_terms_days}",
-                expand=False,
+        try:
+            rules = load_rules(app_config=app_config)
+        except RulesLoadError as exc:
+            console.print(f"[yellow]Effective rules unavailable: {exc}[/yellow]")
+        else:
+            console.print(
+                Panel(
+                    "[bold]Effective Rules[/bold]\n"
+                    f"CPA threshold: ${rules.optimization.cpa_threshold:g} | "
+                    f"Min installs: {rules.optimization.min_installs} | "
+                    f"Min spend: ${rules.optimization.min_spend:g} | "
+                    f"Search terms days: {rules.reporting.search_terms_days}",
+                    expand=False,
+                )
             )
-        )
 
         if len(multi.apps) > 1:
             console.print(f"\n[dim]Showing active app. Run 'asa config list-apps' to see all {len(multi.apps)} apps.[/dim]")
