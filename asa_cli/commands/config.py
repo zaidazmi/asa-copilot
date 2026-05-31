@@ -34,11 +34,12 @@ app = typer.Typer(help="Configuration management commands")
 console = Console()
 
 ASA_COPILOT_BANNER = r"""
-   ___   _____ ___       ___          _ __      __
-  / _ | / ___// _ | ____/ _ \___ ___ (_) /___  / /_
- / __ |_\ \ / __ |/___/ ___/ _ `/ // / / __/ / __/
-/_/ |_/___//_/ |_|   /_/   \_,_/\_, /_/\__/  \__/
-                                /___/
+ █████╗ ███████╗ █████╗        ██████╗ ██████╗ ██████╗ ██╗██╗      ██████╗ ████████╗
+██╔══██╗██╔════╝██╔══██╗      ██╔════╝██╔═══██╗██╔══██╗██║██║     ██╔═══██╗╚══██╔══╝
+███████║███████╗███████║█████╗██║     ██║   ██║██████╔╝██║██║     ██║   ██║   ██║
+██╔══██║╚════██║██╔══██║╚════╝██║     ██║   ██║██╔═══╝ ██║██║     ██║   ██║   ██║
+██║  ██║███████║██║  ██║      ╚██████╗╚██████╔╝██║     ██║███████╗╚██████╔╝   ██║
+╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝       ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝ ╚═════╝    ╚═╝
 """
 
 
@@ -48,7 +49,7 @@ def setup_config(
     app_only: bool = typer.Option(False, "--app", "-a", help="Only configure app settings"),
 ):
     """Set up API credentials and app configuration."""
-    console.print(f"[cyan]{ASA_COPILOT_BANNER}[/cyan]")
+    console.print(ASA_COPILOT_BANNER, style="cyan", soft_wrap=True)
     if not app_only:
         console.print(Panel("[bold]Step 1: API Credentials[/bold]", expand=False))
 
