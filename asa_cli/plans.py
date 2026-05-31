@@ -17,6 +17,7 @@ from rich.table import Table
 
 from .api import SearchAdsClient
 from .config import CONFIG_DIR, MatchType, ensure_config_dir
+from .decisions import log_applied_plan_decisions
 
 console = Console()
 
@@ -28,6 +29,10 @@ class PlanLoadError(ValueError):
     """Raised when a plan file cannot be loaded or validated."""
 
 
+class PlanReasonError(ValueError):
+    """Raised when executable plan actions are missing reasons."""
+
+
 class PlanActionType(str, Enum):
     """Supported plan action types."""
 
@@ -35,8 +40,29 @@ class PlanActionType(str, Enum):
     ADD_NEGATIVE_KEYWORDS = "add_negative_keywords"
     UPDATE_KEYWORD_BID = "update_keyword_bid"
     PAUSE_KEYWORD = "pause_keyword"
+    PAUSE_CAMPAIGN = "pause_campaign"
+    ENABLE_CAMPAIGN = "enable_campaign"
+    CLONE_CAMPAIGN = "clone_campaign"
+    CREATE_CAMPAIGN = "create_campaign"
+    CREATE_AD_GROUP = "create_ad_group"
+    UPDATE_AD_GROUP = "update_ad_group"
     UPDATE_CAMPAIGN_BUDGET = "update_campaign_budget"
     CREATIVE_MAPPING_CHECK = "creative_mapping_check"
+
+
+EXECUTABLE_ACTION_TYPES = {
+    PlanActionType.ADD_KEYWORDS,
+    PlanActionType.ADD_NEGATIVE_KEYWORDS,
+    PlanActionType.UPDATE_KEYWORD_BID,
+    PlanActionType.PAUSE_KEYWORD,
+    PlanActionType.PAUSE_CAMPAIGN,
+    PlanActionType.ENABLE_CAMPAIGN,
+    PlanActionType.CLONE_CAMPAIGN,
+    PlanActionType.CREATE_CAMPAIGN,
+    PlanActionType.CREATE_AD_GROUP,
+    PlanActionType.UPDATE_AD_GROUP,
+    PlanActionType.UPDATE_CAMPAIGN_BUDGET,
+}
 
 
 class PlanAction(BaseModel):
@@ -109,13 +135,20 @@ def load_plan(path: Path) -> ChangePlan:
 
 def save_plan(plan: ChangePlan, path: Path) -> None:
     """Write a change plan to JSON."""
+    validate_plan_reasons(plan)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         f.write(plan.model_dump_json(indent=2))
         f.write("\n")
 
 
-def save_applied_plan(plan: ChangePlan, result: ApplyPlanResult) -> None:
+def save_applied_plan(
+    plan: ChangePlan,
+    result: ApplyPlanResult,
+    *,
+    actor: str = "cli",
+    approval_note: Optional[str] = None,
+) -> None:
     """Append an applied plan record to local audit history."""
     ensure_config_dir()
     record = {
@@ -125,6 +158,27 @@ def save_applied_plan(plan: ChangePlan, result: ApplyPlanResult) -> None:
     with open(APPLIED_PLANS_FILE, "a") as f:
         f.write(json.dumps(record, default=str))
         f.write("\n")
+    log_applied_plan_decisions(plan, result, actor=actor, approval_note=approval_note)
+
+
+def missing_reason_actions(plan: ChangePlan) -> list[PlanAction]:
+    """Return executable actions that do not explain why they exist."""
+    return [
+        action
+        for action in plan.actions
+        if action.type in EXECUTABLE_ACTION_TYPES and not (action.reason or "").strip()
+    ]
+
+
+def validate_plan_reasons(plan: ChangePlan) -> None:
+    """Require reasons before new plans can be saved or applied."""
+    missing = missing_reason_actions(plan)
+    if not missing:
+        return
+    details = ", ".join(f"{action.type.value}:{action.id}" for action in missing[:5])
+    if len(missing) > 5:
+        details += f", ... ({len(missing)} total)"
+    raise PlanReasonError(f"Executable plan actions require reasons: {details}")
 
 
 def _duplicate_errors_only(errors: list[dict[str, Any]]) -> bool:
@@ -201,7 +255,11 @@ def apply_action(client: SearchAdsClient, action: PlanAction) -> ApplyActionResu
             )
 
         if action.type == PlanActionType.UPDATE_KEYWORD_BID:
-            if action.campaign_id is None or action.ad_group_id is None or action.keyword_id is None:
+            if (
+                action.campaign_id is None
+                or action.ad_group_id is None
+                or action.keyword_id is None
+            ):
                 return ApplyActionResult(
                     action_id=action.id,
                     action_type=action.type,
@@ -225,19 +283,27 @@ def apply_action(client: SearchAdsClient, action: PlanAction) -> ApplyActionResu
                 action_id=action.id,
                 action_type=action.type,
                 success=updated is not None,
-                message="Updated keyword bid" if updated is not None else "Failed to update keyword bid",
+                message=(
+                    "Updated keyword bid" if updated is not None else "Failed to update keyword bid"
+                ),
                 data={"updated": updated or []},
             )
 
         if action.type == PlanActionType.PAUSE_KEYWORD:
-            if action.campaign_id is None or action.ad_group_id is None or action.keyword_id is None:
+            if (
+                action.campaign_id is None
+                or action.ad_group_id is None
+                or action.keyword_id is None
+            ):
                 return ApplyActionResult(
                     action_id=action.id,
                     action_type=action.type,
                     success=False,
                     message="Missing campaign_id, ad_group_id, or keyword_id",
                 )
-            success = client.pause_keyword(action.campaign_id, action.ad_group_id, action.keyword_id)
+            success = client.pause_keyword(
+                action.campaign_id, action.ad_group_id, action.keyword_id
+            )
             return ApplyActionResult(
                 action_id=action.id,
                 action_type=action.type,
@@ -266,8 +332,55 @@ def apply_action(client: SearchAdsClient, action: PlanAction) -> ApplyActionResu
                 action_id=action.id,
                 action_type=action.type,
                 success=updated is not None,
-                message="Updated campaign budget" if updated is not None else "Failed to update budget",
+                message=(
+                    "Updated campaign budget" if updated is not None else "Failed to update budget"
+                ),
                 data={"updated": updated or {}},
+            )
+
+        if action.type == PlanActionType.PAUSE_CAMPAIGN:
+            if action.campaign_id is None:
+                return ApplyActionResult(
+                    action_id=action.id,
+                    action_type=action.type,
+                    success=False,
+                    message="Missing campaign_id",
+                )
+            success = client.pause_campaign(action.campaign_id)
+            return ApplyActionResult(
+                action_id=action.id,
+                action_type=action.type,
+                success=success,
+                message="Paused campaign" if success else "Failed to pause campaign",
+            )
+
+        if action.type == PlanActionType.ENABLE_CAMPAIGN:
+            if action.campaign_id is None:
+                return ApplyActionResult(
+                    action_id=action.id,
+                    action_type=action.type,
+                    success=False,
+                    message="Missing campaign_id",
+                )
+            success = client.enable_campaign(action.campaign_id)
+            return ApplyActionResult(
+                action_id=action.id,
+                action_type=action.type,
+                success=success,
+                message="Enabled campaign" if success else "Failed to enable campaign",
+            )
+
+        if action.type in {
+            PlanActionType.CLONE_CAMPAIGN,
+            PlanActionType.CREATE_CAMPAIGN,
+            PlanActionType.CREATE_AD_GROUP,
+            PlanActionType.UPDATE_AD_GROUP,
+        }:
+            return ApplyActionResult(
+                action_id=action.id,
+                action_type=action.type,
+                success=False,
+                message=f"{action.type.value} is not executable via plan apply yet",
             )
 
         return ApplyActionResult(
@@ -287,6 +400,7 @@ def apply_action(client: SearchAdsClient, action: PlanAction) -> ApplyActionResu
 
 def apply_plan(client: SearchAdsClient, plan: ChangePlan) -> ApplyPlanResult:
     """Apply all actions in a plan."""
+    validate_plan_reasons(plan)
     results = [apply_action(client, action) for action in plan.actions]
     return ApplyPlanResult(
         plan_id=plan.id,

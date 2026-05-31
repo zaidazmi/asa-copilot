@@ -14,6 +14,7 @@ from .commands import (
     budget,
     campaigns,
     config,
+    decisions,
     geo,
     keywords,
     optimize,
@@ -26,6 +27,7 @@ from .api import SearchAdsClient
 from .config import load_credentials
 from .plans import (
     PlanLoadError,
+    PlanReasonError,
     apply_plan,
     display_apply_result,
     display_plan,
@@ -48,6 +50,7 @@ app.add_typer(campaigns.app, name="campaigns", help="Campaign management")
 app.add_typer(adgroups.app, name="adgroups", help="Ad group management")
 app.add_typer(keywords.app, name="keywords", help="Keyword management")
 app.add_typer(plan.app, name="plan", help="Review saved change plans")
+app.add_typer(decisions.app, name="decisions", help="Decision log and reasoning")
 app.add_typer(reports.app, name="reports", help="Reporting and analytics")
 app.add_typer(reports.app, name="report", help="Reporting and analytics")
 app.add_typer(search_terms.app, name="search-terms", help="Search-term mining")
@@ -119,6 +122,7 @@ reporting, keyword management, and optimization.
     asa optimize --lookback 14d --out plan.json - Save an optimization plan
     asa plan show plan.json     - Review a saved plan
     asa apply plan.json         - Apply a saved plan and save audit history
+    asa decisions list          - Show recent decision records
 
   [bold cyan]Reports:[/bold cyan]
     asa report daily            - Daily operator brief
@@ -235,6 +239,8 @@ def apply_plan_cmd(
         False, "--auto-approve", "-y", help="Skip confirmation prompt"
     ),
     output_json: bool = typer.Option(False, "--json", help="Output apply result as JSON"),
+    note: Optional[str] = typer.Option(None, "--note", help="Human approval note"),
+    actor: str = typer.Option("cli", "--actor", help="Actor recorded in the decision log"),
 ):
     """Apply a saved change plan and record it in local audit history."""
     import json
@@ -265,8 +271,15 @@ def apply_plan_cmd(
             return
 
     client = SearchAdsClient(credentials)
-    result = apply_plan(client, change_plan)
-    save_applied_plan(change_plan, result)
+    try:
+        result = apply_plan(client, change_plan)
+    except PlanReasonError as exc:
+        if output_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    save_applied_plan(change_plan, result, actor=actor, approval_note=note)
 
     if output_json:
         print(json.dumps(result.model_dump(mode="json"), indent=2))

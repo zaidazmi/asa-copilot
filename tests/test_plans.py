@@ -10,6 +10,7 @@ from asa_cli.plans import (
     PlanAction,
     PlanActionType,
     PlanLoadError,
+    PlanReasonError,
     apply_plan,
     load_plan,
     save_applied_plan,
@@ -31,6 +32,7 @@ def test_plan_round_trip(tmp_path: Path):
                 campaign_id=123,
                 keywords=["free notes"],
                 match_type=MatchType.EXACT,
+                reason="Block irrelevant spend",
             )
         ],
     )
@@ -109,6 +111,7 @@ def test_apply_plan_adds_keywords_and_negatives():
                 ad_group_id=20,
                 keywords=["meeting notes"],
                 match_type=MatchType.EXACT,
+                reason="Search term has strong conversion quality",
             ),
             PlanAction(
                 type=PlanActionType.ADD_NEGATIVE_KEYWORDS,
@@ -116,6 +119,7 @@ def test_apply_plan_adds_keywords_and_negatives():
                 campaign_id=30,
                 keywords=["bad fit"],
                 match_type=MatchType.EXACT,
+                reason="Search term spent without installs",
             ),
         ]
     )
@@ -151,6 +155,7 @@ def test_apply_plan_duplicate_keyword_errors_are_success():
                 description="Block existing term",
                 campaign_id=30,
                 keywords=["already blocked"],
+                reason="Prevent duplicate bad-fit traffic",
             )
         ]
     )
@@ -167,7 +172,12 @@ def test_save_applied_plan_writes_jsonl(tmp_path: Path):
     plan = ChangePlan(actions=[])
     result = apply_plan(MagicMock(), plan)
 
-    with patch("asa_cli.plans.APPLIED_PLANS_FILE", audit_path):
+    decision_path = tmp_path / "decision-log.jsonl"
+    with (
+        patch("asa_cli.plans.APPLIED_PLANS_FILE", audit_path),
+        patch("asa_cli.decisions.DECISION_LOG_FILE", decision_path),
+        patch("asa_cli.plans.log_applied_plan_decisions") as log_decisions,
+    ):
         save_applied_plan(plan, result)
 
     records = audit_path.read_text().strip().splitlines()
@@ -175,6 +185,56 @@ def test_save_applied_plan_writes_jsonl(tmp_path: Path):
     record = json.loads(records[0])
     assert record["plan"]["id"] == plan.id
     assert record["result"]["plan_id"] == plan.id
+    log_decisions.assert_called_once()
+
+
+def test_apply_plan_requires_reasons_for_executable_actions():
+    """Executable actions must explain why they exist before apply."""
+    plan = ChangePlan(
+        actions=[
+            PlanAction(
+                type=PlanActionType.PAUSE_CAMPAIGN,
+                description="Pause campaign",
+                campaign_id=123,
+            )
+        ]
+    )
+
+    try:
+        apply_plan(MagicMock(), plan)
+    except PlanReasonError as exc:
+        assert "require reasons" in str(exc)
+    else:
+        raise AssertionError("Expected PlanReasonError")
+
+
+def test_apply_plan_campaign_pause_and_enable_actions():
+    """Campaign lifecycle plan actions dispatch to campaign API methods."""
+    client = MagicMock()
+    client.pause_campaign.return_value = True
+    client.enable_campaign.return_value = True
+    plan = ChangePlan(
+        actions=[
+            PlanAction(
+                type=PlanActionType.PAUSE_CAMPAIGN,
+                description="Pause inefficient campaign",
+                campaign_id=123,
+                reason="Poor CPA after test window",
+            ),
+            PlanAction(
+                type=PlanActionType.ENABLE_CAMPAIGN,
+                description="Resume campaign",
+                campaign_id=456,
+                reason="App review issue resolved",
+            ),
+        ]
+    )
+
+    result = apply_plan(client, plan)
+
+    assert result.success is True
+    client.pause_campaign.assert_called_once_with(123)
+    client.enable_campaign.assert_called_once_with(456)
 
 
 def test_build_optimization_plan_creates_promotion_and_negative_actions():

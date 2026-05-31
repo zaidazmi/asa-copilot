@@ -38,6 +38,7 @@ asa --help
 | --- | --- |
 | Multi-app config | Manage multiple apps and switch with `asa --app <slug> ...` |
 | Plan / apply safety | Save proposed spend-affecting changes to JSON, review them, then apply |
+| Decision log | Require reasons for serving/spend changes and store them in a local JSONL log |
 | Search-term mining | Promote winners, block losers, and protect Discovery with negatives |
 | Guide hygiene | Detect duplicate active keywords, missing Discovery negatives, Search Match drift, and multi-country drift |
 | Optimization rules | Raise/lower bids, pause poor keywords, add negatives, and promote terms using configurable thresholds |
@@ -80,7 +81,8 @@ Local files live under:
 |-- credentials.json
 |-- config.json
 |-- rules.json
-`-- applied-plans.jsonl
+|-- applied-plans.jsonl
+`-- decision-log.jsonl
 ```
 
 `credentials.json` contains sensitive Apple Ads API credentials. Keep it local and out of git.
@@ -121,15 +123,15 @@ Use this to understand campaign status, budget health, and recent performance be
 
 ```bash
 asa campaigns setup --countries US --budget 50 --dry-run
-asa campaigns setup --countries US --budget 50
+asa campaigns setup --countries US --budget 50 --reason "Launch tested Search Results structure"
 
-asa campaigns create "MyApp - Category - Exact - US" --countries US --budget 20 --status PAUSED
-asa campaigns update 123456789 --budget 15
-asa campaigns pause 123456789
-asa campaigns enable 123456789
+asa campaigns create "MyApp - Category - Exact - US" --countries US --budget 20 --status PAUSED --reason "Test category exact demand"
+asa campaigns update 123456789 --budget 15 --reason "Reduce spend while CPA is above target"
+asa campaigns pause 123456789 --reason "Poor CPA after 14 day test"
+asa campaigns enable 123456789 --reason "App review issue resolved"
 ```
 
-Campaign operations are explicit by default. Use campaign IDs when changing live objects.
+Campaign operations are explicit by default. Use campaign IDs when changing live objects. Serving and spend mutations capture a reason, either through `--reason` or an interactive prompt.
 
 ### 3. Manage Keywords
 
@@ -183,7 +185,7 @@ For spend-affecting optimization, prefer a plan first:
 ```bash
 asa optimize --lookback 14d --out optimize-plan.json
 asa plan show optimize-plan.json
-asa apply optimize-plan.json
+asa apply optimize-plan.json --note "Approved after weekly review"
 ```
 
 Plan actions currently cover:
@@ -195,10 +197,19 @@ Plan actions currently cover:
 - update campaign daily budgets
 - record informational guide checks
 
-Applied plans are appended locally:
+Executable plan actions require a reason before they can be saved or applied. Applied plans and decision records are appended locally:
 
 ```text
 ~/.asa-cli/applied-plans.jsonl
+~/.asa-cli/decision-log.jsonl
+```
+
+Review decision history:
+
+```bash
+asa decisions list
+asa decisions show <DECISION_ID>
+asa decisions export --output decisions.md
 ```
 
 ### 6. Operate Daily Or Weekly
@@ -323,10 +334,24 @@ asa budget list
 asa budget get <BUDGET_ORDER_ID>
 asa budget status --rules asa-rules.json
 asa budget pacing --days 7 --out budget-plan.json
-asa budget create --name "June 2026" --budget 5000 --start 2026-06-01 --end 2026-06-30
+asa budget create --name "June 2026" --budget 5000 --start 2026-06-01 --end 2026-06-30 --reason "Fund June scaling plan"
 ```
 
 Budget status highlights serving and budget problems. Budget pacing turns recent spend quality into plan actions.
+
+## Decision Log
+
+Every serving or spend-affecting workflow should explain why the change exists. Generated plans store action-level reasons, metrics, source, and rule metadata. Direct campaign, ad group, and budget lifecycle commands also require a reason before mutating live account state.
+
+```bash
+asa campaigns pause 123456789 --reason "Duplicate campaign replaced by clean clone"
+asa apply budget-plan.json --note "Approved because Category CPA is below target"
+asa decisions list
+asa decisions show <DECISION_ID>
+asa decisions export --output decisions.md
+```
+
+For LLM-assisted operations, the expected standard is the same: record the strategic reason, evidence, rules used, expected outcome, and follow-up window in the local decision log.
 
 ## Geo, Ads, And Account Tools
 
@@ -386,11 +411,14 @@ The practical rule is simple: keep high-value exact terms controlled, use Discov
 `asa-copilot` treats account changes as operations, not magic.
 
 - spend-affecting recommendations can be saved as plans first
+- executable plan actions require a reason before save/apply
+- campaign pause/enable/create/update/clone commands capture a reason
 - destructive actions require explicit commands
 - duplicate keyword errors are handled without failing the whole run
 - bid rules can cap aggressive changes
 - credentials stay in local config files
 - applied plans are recorded locally
+- decision records are recorded locally
 - JSON output is available for automation and scheduled runs
 
 ## Local Checks
@@ -401,6 +429,7 @@ python -m py_compile $(find asa_cli -name '*.py' -print)
 python -m asa_cli.main search-terms mine --help
 python -m asa_cli.main report weekly --help
 python -m asa_cli.main budget pacing --help
+python -m asa_cli.main decisions list --help
 ```
 
 ## License

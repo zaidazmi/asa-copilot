@@ -1,6 +1,7 @@
 """Budget management commands."""
 
 import json
+import sys
 from datetime import datetime, timedelta
 from typing import Optional
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Prompt
 from rich.table import Table
 
 from ..api import SearchAdsClient
@@ -19,6 +21,7 @@ from ..config import (
     load_credentials,
     load_rules,
 )
+from ..decisions import log_manual_decision
 from ..operator_reports import build_budget_pacing_actions, summarize_report_rows
 from ..plans import ChangePlan, save_plan
 
@@ -32,6 +35,20 @@ def _resolve_app_name() -> Optional[str]:
         return None
     app_config = get_current_app_config()
     return app_config.app_name if app_config else None
+
+
+def _require_reason(reason: Optional[str], action: str) -> str:
+    """Require a reason for spend-affecting direct commands."""
+    if reason and reason.strip():
+        return reason.strip()
+    if not sys.stdin.isatty():
+        console.print(f"[red]A --reason is required for {action}.[/red]")
+        raise typer.Exit(1)
+    while True:
+        reason_text = Prompt.ask(f"Reason for {action}").strip()
+        if reason_text:
+            return reason_text
+        console.print("[red]A reason is required.[/red]")
 
 
 def _campaign_budget_summaries(
@@ -406,6 +423,9 @@ def create_budget_order(
     end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
     client_name: Optional[str] = typer.Option(None, "--client-name", help="Client name"),
     primary_buyer_email: Optional[str] = typer.Option(None, "--email", help="Primary buyer email"),
+    reason: Optional[str] = typer.Option(
+        None, "--reason", help="Reason for creating the budget order"
+    ),
 ):
     """Create a new budget order."""
     credentials = load_credentials()
@@ -414,6 +434,7 @@ def create_budget_order(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    reason_text = _require_reason(reason, "creating budget order")
 
     kwargs = {}
     if client_name:
@@ -439,6 +460,19 @@ def create_budget_order(
         console.print(f"\n[green]Budget order created successfully![/green]")
         console.print(f"  ID: [cyan]{bo.get('id')}[/cyan]")
         console.print(f"  Name: [cyan]{bo.get('name')}[/cyan]")
+        log_manual_decision(
+            event_type="budget_order_created",
+            reason=reason_text,
+            command="budget create",
+            metadata={
+                "budget": budget,
+                "start_date": start_date,
+                "end_date": end_date,
+                "client_name": client_name,
+                "primary_buyer_email": primary_buyer_email,
+            },
+            result={"budget_order": bo},
+        )
     else:
         console.print("[red]Failed to create budget order.[/red]")
         raise typer.Exit(1)

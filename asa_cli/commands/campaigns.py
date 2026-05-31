@@ -1,11 +1,12 @@
 """Campaign management commands."""
 
+import sys
 from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from ..api import SearchAdsClient
@@ -19,6 +20,7 @@ from ..config import (
     load_credentials,
     parse_campaign_name,
 )
+from ..decisions import log_manual_decision
 
 app = typer.Typer(help="Campaign management commands")
 console = Console()
@@ -32,15 +34,37 @@ def _resolve_app_name() -> Optional[str]:
     return app_config.app_name if app_config else None
 
 
+def _require_reason(reason: Optional[str], action: str) -> str:
+    """Require a reason for serving/spend-affecting direct commands."""
+    if reason and reason.strip():
+        return reason.strip()
+    if not sys.stdin.isatty():
+        console.print(f"[red]A --reason is required for {action}.[/red]")
+        raise typer.Exit(1)
+    while True:
+        reason_text = Prompt.ask(f"Reason for {action}").strip()
+        if reason_text:
+            return reason_text
+        console.print("[red]A reason is required.[/red]")
+
+
 @app.command("list")
 def list_campaigns(
     all_campaigns: bool = typer.Option(
         False, "--all", "-a", help="Show all campaigns, not just ASA CLI managed"
     ),
-    filter_name: Optional[str] = typer.Option(None, "--filter", "-f", help="Filter campaigns by name"),
-    status_filter: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status (RUNNING, PAUSED)"),
-    campaign_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by type (brand, category, competitor, discovery)"),
-    show_bids: bool = typer.Option(False, "--bids", "-b", help="Show ad group default bids (slower)"),
+    filter_name: Optional[str] = typer.Option(
+        None, "--filter", "-f", help="Filter campaigns by name"
+    ),
+    status_filter: Optional[str] = typer.Option(
+        None, "--status", "-s", help="Filter by status (RUNNING, PAUSED)"
+    ),
+    campaign_type: Optional[str] = typer.Option(
+        None, "--type", "-t", help="Filter by type (brand, category, competitor, discovery)"
+    ),
+    show_bids: bool = typer.Option(
+        False, "--bids", "-b", help="Show ad group default bids (slower)"
+    ),
 ):
     """List all campaigns."""
     credentials = load_credentials()
@@ -178,6 +202,9 @@ def setup_campaigns(
     budget: float = typer.Option(50.0, "--budget", "-b", help="Daily budget per campaign (USD)"),
     bid: float = typer.Option(1.50, "--bid", help="Default keyword bid (USD)"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without creating"),
+    reason: Optional[str] = typer.Option(
+        None, "--reason", help="Reason for creating setup campaigns"
+    ),
 ):
     """Set up the 4-campaign structure (Brand, Category, Competitor, Discovery)."""
     credentials = load_credentials()
@@ -219,6 +246,8 @@ def setup_campaigns(
         console.print("\n[yellow]Dry run - no changes made.[/yellow]")
         return
 
+    reason_text = _require_reason(reason, "creating setup campaigns")
+
     if not Confirm.ask("\nProceed with campaign creation?"):
         console.print("[yellow]Cancelled.[/yellow]")
         return
@@ -229,7 +258,11 @@ def setup_campaigns(
     with console.status("[bold blue]Checking for existing campaigns..."):
         existing = client.get_campaigns()
 
-    existing_types = {parse_campaign_name(c.get("name", ""), app_name=app_name)[1] for c in existing if parse_campaign_name(c.get("name", ""), app_name=app_name)}
+    existing_types = {
+        parse_campaign_name(c.get("name", ""), app_name=app_name)[1]
+        for c in existing
+        if parse_campaign_name(c.get("name", ""), app_name=app_name)
+    }
 
     for ctype, config in CAMPAIGN_STRUCTURE.items():
         campaign_name = get_campaign_name(ctype, app_name=app_name)
@@ -252,6 +285,7 @@ def setup_campaigns(
 
         campaign_id = campaign.get("id")
         console.print(f"[green]Created campaign: {campaign_name} (ID: {campaign_id})[/green]")
+        created_ad_groups = []
 
         # Create ad groups
         for ag_config in config.ad_groups:
@@ -265,8 +299,26 @@ def setup_campaigns(
 
             if ad_group:
                 console.print(f"  [green]Created ad group: {ag_config.name}[/green]")
+                created_ad_groups.append({"id": ad_group.get("id"), "name": ad_group.get("name")})
             else:
                 console.print(f"  [red]Failed to create ad group: {ag_config.name}[/red]")
+
+        log_manual_decision(
+            event_type="campaign_setup_created",
+            reason=reason_text,
+            command="campaigns setup",
+            app_name=app_config.app_name,
+            campaign_id=campaign_id,
+            campaign_name=campaign_name,
+            metadata={
+                "campaign_type": ctype.value,
+                "countries": country_list,
+                "daily_budget": budget,
+                "default_bid": bid,
+                "ad_groups": created_ad_groups,
+            },
+            result={"campaign": campaign},
+        )
 
     console.print("\n[bold green]Campaign setup complete![/bold green]")
     console.print(
@@ -351,7 +403,9 @@ def audit_campaigns(
     # Other campaigns (without recognized type in name)
     if unmanaged_campaigns:
         console.print(f"\n[bold]Other Campaigns:[/bold] {len(unmanaged_campaigns)}")
-        console.print("  [dim](Campaigns without Brand/Category/Competitor/Discovery in name)[/dim]")
+        console.print(
+            "  [dim](Campaigns without Brand/Category/Competitor/Discovery in name)[/dim]"
+        )
         for campaign in unmanaged_campaigns:
             status = campaign.get("displayStatus", "UNKNOWN")
             console.print(f"  - {campaign.get('name')} [{status}]")
@@ -363,13 +417,16 @@ def audit_campaigns(
             console.print(f"  [red]•[/red] {issue}")
         console.print("\nRun [cyan]asa campaigns setup[/cyan] to create missing campaigns.")
     else:
-        console.print("\n[bold green]Campaign structure matches Apple's recommendations[/bold green]")
+        console.print(
+            "\n[bold green]Campaign structure matches Apple's recommendations[/bold green]"
+        )
 
 
 @app.command("pause")
 def pause_campaign(
     campaign_id: Optional[int] = typer.Argument(None, help="Campaign ID to pause"),
     all_campaigns: bool = typer.Option(False, "--all", "-a", help="Pause all managed campaigns"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for pausing campaign(s)"),
 ):
     """Pause a campaign or all managed campaigns."""
     credentials = load_credentials()
@@ -382,12 +439,15 @@ def pause_campaign(
 
     if all_campaigns:
         campaigns = client.get_campaigns()
-        managed = [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+        managed = [
+            c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+        ]
 
         if not managed:
             console.print("[yellow]No managed campaigns found.[/yellow]")
             return
 
+        reason_text = _require_reason(reason, "pausing campaign(s)")
         if not Confirm.ask(f"Pause {len(managed)} managed campaigns?"):
             return
 
@@ -395,12 +455,30 @@ def pause_campaign(
             cid = campaign.get("id")
             if client.pause_campaign(cid):
                 console.print(f"[green]Paused: {campaign.get('name')}[/green]")
+                log_manual_decision(
+                    event_type="campaign_paused",
+                    reason=reason_text,
+                    command="campaigns pause --all",
+                    app_name=app_name,
+                    campaign_id=cid,
+                    campaign_name=campaign.get("name"),
+                    result={"success": True},
+                )
             else:
                 console.print(f"[red]Failed to pause: {campaign.get('name')}[/red]")
 
     elif campaign_id:
+        reason_text = _require_reason(reason, "pausing campaign")
         if client.pause_campaign(campaign_id):
             console.print(f"[green]Campaign {campaign_id} paused.[/green]")
+            log_manual_decision(
+                event_type="campaign_paused",
+                reason=reason_text,
+                command="campaigns pause",
+                app_name=app_name,
+                campaign_id=campaign_id,
+                result={"success": True},
+            )
         else:
             console.print(f"[red]Failed to pause campaign {campaign_id}.[/red]")
     else:
@@ -412,6 +490,7 @@ def pause_campaign(
 def enable_campaign(
     campaign_id: Optional[int] = typer.Argument(None, help="Campaign ID to enable"),
     all_campaigns: bool = typer.Option(False, "--all", "-a", help="Enable all managed campaigns"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for enabling campaign(s)"),
 ):
     """Enable a campaign or all managed campaigns."""
     credentials = load_credentials()
@@ -424,12 +503,15 @@ def enable_campaign(
 
     if all_campaigns:
         campaigns = client.get_campaigns()
-        managed = [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+        managed = [
+            c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+        ]
 
         if not managed:
             console.print("[yellow]No managed campaigns found.[/yellow]")
             return
 
+        reason_text = _require_reason(reason, "enabling campaign(s)")
         if not Confirm.ask(f"Enable {len(managed)} managed campaigns?"):
             return
 
@@ -437,12 +519,30 @@ def enable_campaign(
             cid = campaign.get("id")
             if client.enable_campaign(cid):
                 console.print(f"[green]Enabled: {campaign.get('name')}[/green]")
+                log_manual_decision(
+                    event_type="campaign_enabled",
+                    reason=reason_text,
+                    command="campaigns enable --all",
+                    app_name=app_name,
+                    campaign_id=cid,
+                    campaign_name=campaign.get("name"),
+                    result={"success": True},
+                )
             else:
                 console.print(f"[red]Failed to enable: {campaign.get('name')}[/red]")
 
     elif campaign_id:
+        reason_text = _require_reason(reason, "enabling campaign")
         if client.enable_campaign(campaign_id):
             console.print(f"[green]Campaign {campaign_id} enabled.[/green]")
+            log_manual_decision(
+                event_type="campaign_enabled",
+                reason=reason_text,
+                command="campaigns enable",
+                app_name=app_name,
+                campaign_id=campaign_id,
+                result={"success": True},
+            )
         else:
             console.print(f"[red]Failed to enable campaign {campaign_id}.[/red]")
     else:
@@ -455,7 +555,10 @@ def create_campaign(
     name: str = typer.Argument(..., help="Campaign name"),
     budget: float = typer.Option(50.0, "--budget", "-b", help="Daily budget (USD)"),
     countries: str = typer.Option("US", "--countries", "-c", help="Comma-separated country codes"),
-    status: str = typer.Option("ENABLED", "--status", "-s", help="Initial status (ENABLED or PAUSED)"),
+    status: str = typer.Option(
+        "ENABLED", "--status", "-s", help="Initial status (ENABLED or PAUSED)"
+    ),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for creating the campaign"),
 ):
     """Create a new campaign with custom settings."""
     credentials = load_credentials()
@@ -476,6 +579,7 @@ def create_campaign(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    reason_text = _require_reason(reason, "creating campaign")
 
     console.print(f"\nCreating campaign: [cyan]{name}[/cyan]")
     console.print(f"  Daily Budget: [cyan]${budget}[/cyan]")
@@ -495,6 +599,16 @@ def create_campaign(
         console.print(f"\n[green]Campaign created successfully![/green]")
         console.print(f"  ID: [cyan]{campaign.get('id')}[/cyan]")
         console.print(f"  Name: [cyan]{campaign.get('name')}[/cyan]")
+        log_manual_decision(
+            event_type="campaign_created",
+            reason=reason_text,
+            command="campaigns create",
+            app_name=app_config.app_name,
+            campaign_id=campaign.get("id"),
+            campaign_name=campaign.get("name"),
+            metadata={"countries": country_list, "daily_budget": budget, "status": status_upper},
+            result={"campaign": campaign},
+        )
     else:
         console.print("[red]Failed to create campaign.[/red]")
         raise typer.Exit(1)
@@ -506,14 +620,20 @@ def update_campaign(
     name: Optional[str] = typer.Option(None, "--name", "-n", help="New campaign name"),
     budget: Optional[float] = typer.Option(None, "--budget", "-b", help="New daily budget (USD)"),
     lifetime_budget: Optional[float] = typer.Option(
-        None, "--lifetime-budget", "-L",
+        None,
+        "--lifetime-budget",
+        "-L",
         help="New lifetime budget (USD). NOTE: Apple is discontinuing lifetime budgets on 2026-06-16; prefer --clear-lifetime.",
     ),
     clear_lifetime: bool = typer.Option(
-        False, "--clear-lifetime",
+        False,
+        "--clear-lifetime",
         help="Remove the lifetime budget cap on the campaign (sets budgetAmount=null). Use this to unblock campaigns that silently stopped serving after hitting their lifetime cap.",
     ),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="New status (ENABLED or PAUSED)"),
+    status: Optional[str] = typer.Option(
+        None, "--status", "-s", help="New status (ENABLED or PAUSED)"
+    ),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for updating the campaign"),
 ):
     """Update a campaign's name, budget, lifetime budget, or status."""
     credentials = load_credentials()
@@ -522,7 +642,9 @@ def update_campaign(
         raise typer.Exit(1)
 
     if not any([name, budget, lifetime_budget, clear_lifetime, status]):
-        console.print("[red]No updates provided. Use --name, --budget, --lifetime-budget, --clear-lifetime, or --status.[/red]")
+        console.print(
+            "[red]No updates provided. Use --name, --budget, --lifetime-budget, --clear-lifetime, or --status.[/red]"
+        )
         raise typer.Exit(1)
 
     if lifetime_budget is not None and clear_lifetime:
@@ -530,12 +652,15 @@ def update_campaign(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    app_name = _resolve_app_name()
 
     # Verify campaign exists
     campaign = client.get_campaign(campaign_id)
     if not campaign:
         console.print(f"[red]Campaign {campaign_id} not found.[/red]")
         raise typer.Exit(1)
+
+    reason_text = _require_reason(reason, "updating campaign")
 
     updates = {}
     changes = []
@@ -578,6 +703,23 @@ def update_campaign(
 
     if result:
         console.print("\n[green]Campaign updated successfully![/green]")
+        event_type = "campaign_updated"
+        if updates.get("status") == "PAUSED":
+            event_type = "campaign_paused"
+        elif updates.get("status") == "ENABLED":
+            event_type = "campaign_enabled"
+        elif "dailyBudgetAmount" in updates or "budgetAmount" in updates:
+            event_type = "campaign_budget_updated"
+        log_manual_decision(
+            event_type=event_type,
+            reason=reason_text,
+            command="campaigns update",
+            app_name=app_name,
+            campaign_id=campaign_id,
+            campaign_name=campaign.get("name"),
+            metadata={"updates": updates, "changes": changes},
+            result={"campaign": result},
+        )
     else:
         console.print("[red]Failed to update campaign.[/red]")
         raise typer.Exit(1)
@@ -586,12 +728,18 @@ def update_campaign(
 @app.command("clone")
 def clone_campaign(
     source_campaign_id: int = typer.Argument(..., help="Campaign ID to duplicate"),
-    new_name: Optional[str] = typer.Option(None, "--name", "-n",
-        help="Name for the clone (defaults to '<source> v2')"),
-    keep_lifetime: bool = typer.Option(False, "--keep-lifetime",
-        help="Copy the source's lifetime budget too. Default: drop it, since Apple is discontinuing lifetime budgets on 2026-06-16 and the most common reason to clone is to escape a stuck TOTAL_BUDGET_EXHAUSTED state."),
-    pause_source: bool = typer.Option(False, "--pause-source",
-        help="Pause the source campaign after a successful clone."),
+    new_name: Optional[str] = typer.Option(
+        None, "--name", "-n", help="Name for the clone (defaults to '<source> v2')"
+    ),
+    keep_lifetime: bool = typer.Option(
+        False,
+        "--keep-lifetime",
+        help="Copy the source's lifetime budget too. Default: drop it, since Apple is discontinuing lifetime budgets on 2026-06-16 and the most common reason to clone is to escape a stuck TOTAL_BUDGET_EXHAUSTED state.",
+    ),
+    pause_source: bool = typer.Option(
+        False, "--pause-source", help="Pause the source campaign after a successful clone."
+    ),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for cloning the campaign"),
 ):
     """Duplicate a campaign (with ad groups, keywords, and negatives).
 
@@ -616,6 +764,8 @@ def clone_campaign(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    app_name = _resolve_app_name()
+    reason_text = _require_reason(reason, "cloning campaign")
     console.print(f"[cyan]Cloning campaign {source_campaign_id}...[/cyan]")
     with console.status("[bold blue]Reading source + creating clone..."):
         result = client.clone_campaign(
@@ -629,7 +779,9 @@ def clone_campaign(
         console.print("[red]Clone failed — no result returned.[/red]")
         raise typer.Exit(1)
 
-    console.print(f"\n[green]✓ Created campaign id={result['new_id']}[/green] name=[cyan]{result['new_name']}[/cyan]")
+    console.print(
+        f"\n[green]✓ Created campaign id={result['new_id']}[/green] name=[cyan]{result['new_name']}[/cyan]"
+    )
     total_kw = 0
     total_attempted = 0
     for ag in result["ad_groups"]:
@@ -656,6 +808,21 @@ def clone_campaign(
             f"'asa campaigns update {source_campaign_id} --status PAUSED' when you've verified the clone.[/dim]"
         )
 
+    log_manual_decision(
+        event_type="campaign_cloned",
+        reason=reason_text,
+        command="campaigns clone",
+        app_name=app_name,
+        campaign_id=result["new_id"],
+        campaign_name=result["new_name"],
+        metadata={
+            "source_campaign_id": source_campaign_id,
+            "keep_lifetime": keep_lifetime,
+            "pause_source": pause_source,
+        },
+        result=result,
+    )
+
 
 @app.command("delete")
 def delete_campaign(
@@ -664,6 +831,7 @@ def delete_campaign(
         False, "--all-unmanaged", help="Delete all unmanaged campaigns"
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for deleting campaign(s)"),
 ):
     """Delete a campaign. WARNING: This is irreversible."""
     credentials = load_credentials()
@@ -676,13 +844,19 @@ def delete_campaign(
 
     if all_unmanaged:
         campaigns = client.get_campaigns()
-        unmanaged = [c for c in campaigns if not parse_campaign_name(c.get("name", ""), app_name=app_name)]
+        unmanaged = [
+            c for c in campaigns if not parse_campaign_name(c.get("name", ""), app_name=app_name)
+        ]
 
         if not unmanaged:
             console.print("[yellow]No unmanaged campaigns found.[/yellow]")
             return
 
-        console.print(f"\n[bold red]WARNING: About to delete {len(unmanaged)} unmanaged campaigns:[/bold red]")
+        reason_text = _require_reason(reason, "deleting unmanaged campaigns")
+
+        console.print(
+            f"\n[bold red]WARNING: About to delete {len(unmanaged)} unmanaged campaigns:[/bold red]"
+        )
         for campaign in unmanaged:
             console.print(f"  - {campaign.get('name')} (ID: {campaign.get('id')})")
 
@@ -695,6 +869,15 @@ def delete_campaign(
             with console.status(f"Deleting {campaign.get('name')}..."):
                 if client.delete_campaign(cid):
                     console.print(f"[green]Deleted: {campaign.get('name')}[/green]")
+                    log_manual_decision(
+                        event_type="campaign_deleted",
+                        reason=reason_text,
+                        command="campaigns delete --all-unmanaged",
+                        app_name=app_name,
+                        campaign_id=cid,
+                        campaign_name=campaign.get("name"),
+                        result={"success": True},
+                    )
                 else:
                     console.print(f"[red]Failed to delete: {campaign.get('name')}[/red]")
 
@@ -704,6 +887,8 @@ def delete_campaign(
         if not campaign:
             console.print(f"[red]Campaign {campaign_id} not found.[/red]")
             raise typer.Exit(1)
+
+        reason_text = _require_reason(reason, "deleting campaign")
 
         campaign_name = campaign.get("name", "Unknown")
         console.print(f"\n[bold red]WARNING: About to delete campaign:[/bold red]")
@@ -717,6 +902,15 @@ def delete_campaign(
         with console.status(f"Deleting campaign {campaign_id}..."):
             if client.delete_campaign(campaign_id):
                 console.print(f"[green]Campaign {campaign_id} deleted.[/green]")
+                log_manual_decision(
+                    event_type="campaign_deleted",
+                    reason=reason_text,
+                    command="campaigns delete",
+                    app_name=app_name,
+                    campaign_id=campaign_id,
+                    campaign_name=campaign_name,
+                    result={"success": True},
+                )
             else:
                 console.print(f"[red]Failed to delete campaign {campaign_id}.[/red]")
     else:
