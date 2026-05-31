@@ -1,5 +1,7 @@
 """Budget management commands."""
 
+import json
+from datetime import datetime, timedelta
 from typing import Optional
 from pathlib import Path
 
@@ -17,6 +19,8 @@ from ..config import (
     load_credentials,
     load_rules,
 )
+from ..operator_reports import build_budget_pacing_actions, summarize_report_rows
+from ..plans import ChangePlan, save_plan
 
 app = typer.Typer(help="Budget management commands")
 console = Console()
@@ -28,6 +32,82 @@ def _resolve_app_name() -> Optional[str]:
         return None
     app_config = get_current_app_config()
     return app_config.app_name if app_config else None
+
+
+def _campaign_budget_summaries(
+    client: SearchAdsClient,
+    *,
+    days: int,
+    app_name: Optional[str],
+) -> list[dict]:
+    """Fetch campaign report summaries for budget pacing."""
+    end = datetime.now()
+    start = end - timedelta(days=days)
+    campaigns = client.get_campaigns()
+    summaries = []
+
+    for campaign in campaigns:
+        ctype = detect_campaign_type(campaign.get("name", ""), app_name=app_name)
+        if app_name and not ctype:
+            continue
+        rows = client.get_campaign_report(campaign.get("id"), start, end, granularity="DAILY")
+        summaries.append(summarize_report_rows(campaign, rows, ctype))
+
+    return summaries
+
+
+def _display_pacing(summaries: list[dict], actions: list, days: int) -> None:
+    """Render campaign budget pacing and recommendations."""
+    console.print(Panel(f"[bold]Budget Pacing[/bold]\nLast {days} days", expand=False))
+
+    table = Table(title="Campaign Pace", show_header=True, header_style="bold magenta")
+    table.add_column("Campaign")
+    table.add_column("Type")
+    table.add_column("Daily Budget", justify="right")
+    table.add_column("Spend", justify="right")
+    table.add_column("Pace", justify="right")
+    table.add_column("Inst", justify="right")
+    table.add_column("CPA", justify="right")
+
+    for summary in summaries:
+        expected = (summary.get("daily_budget") or 0) * days
+        pace = (summary.get("spend", 0) / expected * 100) if expected else 0
+        cpa = summary.get("cpa")
+        table.add_row(
+            summary.get("campaign_name", "")[:36],
+            (summary.get("campaign_type") or "-").upper(),
+            f"${summary.get('daily_budget', 0):,.2f}",
+            f"${summary.get('spend', 0):,.2f}",
+            f"{pace:.0f}%",
+            str(summary.get("installs", 0)),
+            f"${cpa:,.2f}" if cpa is not None else "-",
+        )
+
+    console.print(table)
+
+    if not actions:
+        console.print("[green]No budget pacing actions recommended.[/green]")
+        return
+
+    action_table = Table(
+        title="Recommended Plan Actions", show_header=True, header_style="bold cyan"
+    )
+    action_table.add_column("Type")
+    action_table.add_column("Campaign")
+    action_table.add_column("New Budget")
+    action_table.add_column("Reason")
+    for action in actions:
+        action_table.add_row(
+            action.type.value,
+            action.campaign_name or str(action.campaign_id or "-"),
+            (
+                f"${action.daily_budget_amount:,.2f}"
+                if action.daily_budget_amount is not None
+                else "-"
+            ),
+            action.reason or "",
+        )
+    console.print(action_table)
 
 
 @app.command("list")
@@ -150,7 +230,8 @@ def budget_status(
     # Filter to current app if multi-app
     if app_name:
         statuses = [
-            s for s in statuses
+            s
+            for s in statuses
             if detect_campaign_type(s.get("name", ""), app_name=app_name) is not None
         ]
 
@@ -175,12 +256,18 @@ def budget_status(
         daily = entry.get("dailyBudgetAmount") or {}
         daily_amount = daily.get("amount", "-")
         daily_currency = daily.get("currency", "")
-        daily_str = f"${daily_amount} {daily_currency}".strip() if daily_amount != "-" else "[dim]-[/dim]"
+        daily_str = (
+            f"${daily_amount} {daily_currency}".strip() if daily_amount != "-" else "[dim]-[/dim]"
+        )
 
         lifetime = entry.get("budgetAmount") or {}
         lifetime_amount = lifetime.get("amount", "-")
         lifetime_currency = lifetime.get("currency", "")
-        lifetime_str = f"${lifetime_amount} {lifetime_currency}".strip() if lifetime_amount != "-" else "[dim]-[/dim]"
+        lifetime_str = (
+            f"${lifetime_amount} {lifetime_currency}".strip()
+            if lifetime_amount != "-"
+            else "[dim]-[/dim]"
+        )
 
         total_spend = entry.get("totalSpend", 0.0)
         spend_str = f"${total_spend:,.2f}"
@@ -221,6 +308,94 @@ def budget_status(
 
     console.print(table)
     console.print(f"\n[dim]Total: {len(statuses)} campaigns[/dim]")
+
+
+@app.command("pacing")
+def budget_pacing(
+    daily: bool = typer.Option(False, "--daily", help="Use a 1-day pacing window"),
+    month: bool = typer.Option(False, "--month", help="Use a 30-day pacing window"),
+    days: Optional[int] = typer.Option(None, "--days", "-d", help="Custom pacing window"),
+    output_json: bool = typer.Option(False, "--json", help="Output pacing data as JSON"),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Write budget change plan JSON to this path"
+    ),
+    rules_file: Optional[Path] = typer.Option(
+        None, "--rules", help="JSON or YAML rule file overriding app config defaults"
+    ),
+):
+    """Analyze budget pace and recommend budget plan actions."""
+    if sum([bool(daily), bool(month), days is not None]) > 1:
+        message = "Use only one of --daily, --month, or --days"
+        if output_json:
+            print(json.dumps({"error": message}))
+        else:
+            console.print(f"[red]{message}[/red]")
+        raise typer.Exit(1)
+
+    resolved_days = 1 if daily else 30 if month else days or 7
+    if resolved_days <= 0:
+        if output_json:
+            print(json.dumps({"error": "Days must be a positive integer"}))
+        else:
+            console.print("[red]Days must be a positive integer.[/red]")
+        raise typer.Exit(1)
+
+    credentials = load_credentials()
+    if not credentials:
+        if output_json:
+            print(json.dumps({"error": "No credentials configured"}))
+        else:
+            console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    app_config = get_current_app_config()
+    try:
+        rules = load_rules(rules_file, app_config=app_config)
+    except RulesLoadError as exc:
+        if output_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+    app_name = _resolve_app_name()
+    summaries = _campaign_budget_summaries(client, days=resolved_days, app_name=app_name)
+    actions = build_budget_pacing_actions(
+        summaries,
+        days=resolved_days,
+        rules=rules,
+        source="budget_pacing",
+    )
+    plan = ChangePlan(
+        source="budget_pacing",
+        app_name=app_name,
+        lookback_days=resolved_days,
+        summary=f"{len(actions)} budget pacing actions over {resolved_days} days",
+        actions=actions,
+    )
+
+    if out:
+        save_plan(plan, out)
+        if not output_json:
+            console.print(f"[green]Plan saved to {out}[/green]")
+            console.print(f"[dim]Review with: asa plan show {out}[/dim]")
+            return
+
+    if output_json:
+        print(
+            json.dumps(
+                {
+                    "days": resolved_days,
+                    "campaigns": summaries,
+                    "plan": plan.model_dump(mode="json"),
+                },
+                indent=2,
+            )
+        )
+        return
+
+    _display_pacing(summaries, actions, resolved_days)
 
 
 @app.command("create")

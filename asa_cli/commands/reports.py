@@ -21,6 +21,7 @@ from ..config import (
     parse_campaign_name,
 )
 from ..plans import ChangePlan, save_plan
+from ..operator_reports import build_operator_report
 from ..recommendations import build_keyword_recommendations, keyword_report_row_to_metrics
 
 app = typer.Typer(help="Reporting and analytics commands")
@@ -63,6 +64,172 @@ def get_campaign_type_label(campaign_name: str, app_name: Optional[str] = None) 
         if ctype in name_lower:
             return ctype.upper()
     return campaign_name[:15]
+
+
+def _filter_current_app_campaigns(client: SearchAdsClient) -> tuple[list[dict], Optional[str]]:
+    """Fetch campaigns, scoped to the active app when multi-app config is in use."""
+    campaigns = client.get_campaigns()
+    app_name = _resolve_app_name()
+    if app_name:
+        campaigns = [
+            c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+        ]
+    return campaigns, app_name
+
+
+def _display_operator_report(report: dict, title: str) -> None:
+    """Render a compact operator report."""
+    totals = report["totals"]
+    console.print(
+        Panel(
+            f"[bold]{title}[/bold]\n"
+            f"{report['start_date']} to {report['end_date']} | Target CPA: {format_currency(report['target_cpa'])}",
+            expand=False,
+        )
+    )
+    console.print(
+        f"Spend: [bold]{format_currency(totals['spend'])}[/bold] | "
+        f"Installs: [bold]{format_number(totals['installs'])}[/bold] | "
+        f"CPA: [bold]{format_currency(totals['cpa']) if totals['cpa'] is not None else '-'}[/bold]"
+    )
+
+    table = Table(title="Campaigns", show_header=True, header_style="bold magenta")
+    table.add_column("Campaign")
+    table.add_column("Type")
+    table.add_column("Status")
+    table.add_column("Impr", justify="right")
+    table.add_column("Taps", justify="right")
+    table.add_column("Inst", justify="right")
+    table.add_column("Spend", justify="right")
+    table.add_column("CPA", justify="right")
+
+    for campaign in report["campaigns"]:
+        cpa = campaign["cpa"]
+        table.add_row(
+            campaign["campaign_name"][:36],
+            (campaign["campaign_type"] or "-").upper(),
+            campaign["display_status"],
+            format_number(campaign["impressions"]),
+            format_number(campaign["taps"]),
+            format_number(campaign["installs"]),
+            format_currency(campaign["spend"]),
+            format_currency(cpa) if cpa is not None else "-",
+        )
+
+    console.print(table)
+
+    if report["next_actions"]:
+        action_table = Table(title="Next Actions", show_header=True, header_style="bold cyan")
+        action_table.add_column("Type")
+        action_table.add_column("Campaign")
+        action_table.add_column("Reason")
+        for action in report["next_actions"][:10]:
+            action_table.add_row(
+                action["type"],
+                action.get("campaign_name") or str(action.get("campaign_id") or "-"),
+                action.get("reason") or "",
+            )
+        console.print(action_table)
+    else:
+        console.print("[green]No pacing actions recommended.[/green]")
+
+
+def _run_operator_report(
+    *,
+    title: str,
+    days: int,
+    output_json: bool,
+    out: Optional[Path],
+    rules_file: Optional[Path],
+) -> None:
+    """Shared implementation for daily and weekly reports."""
+    if days <= 0:
+        if output_json:
+            print(json.dumps({"error": "Days must be a positive integer"}))
+        else:
+            console.print("[red]Days must be a positive integer.[/red]")
+        raise typer.Exit(1)
+
+    credentials = load_credentials()
+    if not credentials:
+        if output_json:
+            print(json.dumps({"error": "No credentials configured"}))
+        else:
+            console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    app_config = get_current_app_config()
+    try:
+        rules = load_rules(rules_file, app_config=app_config)
+    except RulesLoadError as exc:
+        if output_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+    campaigns, app_name = _filter_current_app_campaigns(client)
+    report = build_operator_report(
+        client,
+        campaigns=campaigns,
+        days=days,
+        app_name=app_name,
+        rules=rules,
+    )
+
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w") as f:
+            json.dump(report, f, indent=2)
+            f.write("\n")
+        if not output_json:
+            console.print(f"[green]Report saved to {out}[/green]")
+            return
+
+    if output_json:
+        print(json.dumps(report, indent=2))
+        return
+
+    _display_operator_report(report, title)
+
+
+@app.command("daily")
+def report_daily(
+    days: int = typer.Option(1, "--days", "-d", help="Days to include"),
+    output_json: bool = typer.Option(False, "--json", help="Output report JSON"),
+    out: Optional[Path] = typer.Option(None, "--out", help="Write report JSON to this path"),
+    rules_file: Optional[Path] = typer.Option(
+        None, "--rules", help="JSON or YAML rule file overriding app config defaults"
+    ),
+):
+    """Show a daily operator report with pacing next actions."""
+    _run_operator_report(
+        title="Daily Operator Report",
+        days=days,
+        output_json=output_json,
+        out=out,
+        rules_file=rules_file,
+    )
+
+
+@app.command("weekly")
+def report_weekly(
+    days: int = typer.Option(7, "--days", "-d", help="Days to include"),
+    output_json: bool = typer.Option(False, "--json", help="Output report JSON"),
+    out: Optional[Path] = typer.Option(None, "--out", help="Write report JSON to this path"),
+    rules_file: Optional[Path] = typer.Option(
+        None, "--rules", help="JSON or YAML rule file overriding app config defaults"
+    ),
+):
+    """Show a weekly operator report with pacing next actions."""
+    _run_operator_report(
+        title="Weekly Operator Report",
+        days=days,
+        output_json=output_json,
+        out=out,
+        rules_file=rules_file,
+    )
 
 
 @app.command("summary")
@@ -114,14 +281,20 @@ def report_summary(
 
     # Filter campaigns to current app first (in multi-app mode)
     if app_name:
-        campaigns = [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+        campaigns = [
+            c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+        ]
 
     # Filter campaigns based on flag
     if all_campaigns:
-        campaign_list = [(c, get_campaign_type_label(c.get("name", ""), app_name=app_name)) for c in campaigns]
+        campaign_list = [
+            (c, get_campaign_type_label(c.get("name", ""), app_name=app_name)) for c in campaigns
+        ]
     else:
         # Only managed campaigns with specific naming
-        managed = [(c, parse_campaign_name(c.get("name", ""), app_name=app_name)) for c in campaigns]
+        managed = [
+            (c, parse_campaign_name(c.get("name", ""), app_name=app_name)) for c in campaigns
+        ]
         campaign_list = [(c, p[1].value.upper()) for c, p in managed if p]
 
     if not campaign_list:
@@ -195,9 +368,7 @@ def report_summary(
         totals["spend"] += spend
 
     # Add totals row
-    total_ttr = (
-        (totals["taps"] / totals["impressions"] * 100) if totals["impressions"] > 0 else 0
-    )
+    total_ttr = (totals["taps"] / totals["impressions"] * 100) if totals["impressions"] > 0 else 0
     total_cvr = (totals["installs"] / totals["taps"] * 100) if totals["taps"] > 0 else 0
     total_cpa = (totals["spend"] / totals["installs"]) if totals["installs"] > 0 else 0
 
@@ -221,7 +392,9 @@ def report_keywords(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     days: int = typer.Option(30, "--days", "-d", help="Number of days"),
     min_impressions: int = typer.Option(0, "--min-impressions", help="Minimum impressions filter"),
-    sort_by: str = typer.Option("spend", "--sort", "-s", help="Sort by: spend, impressions, taps, installs, cpa"),
+    sort_by: str = typer.Option(
+        "spend", "--sort", "-s", help="Sort by: spend, impressions, taps, installs, cpa"
+    ),
     limit: int = typer.Option(50, "--limit", "-l", help="Max keywords to show"),
 ):
     """Show keyword performance report."""
@@ -242,7 +415,9 @@ def report_keywords(
 
         # Filter to current app in multi-app mode
         if app_name:
-            campaigns = [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+            campaigns = [
+                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+            ]
 
         if not campaigns:
             console.print("[yellow]No campaigns found.[/yellow]")
@@ -289,17 +464,19 @@ def report_keywords(
         spend_data = metrics.get("localSpend", {})
         spend = float(spend_data.get("amount", 0)) if spend_data else 0
 
-        keywords.append({
-            "keyword": metadata.get("keyword", "?"),
-            "match_type": metadata.get("matchType", "?"),
-            "impressions": impressions,
-            "taps": taps,
-            "installs": installs,
-            "spend": spend,
-            "ttr": (taps / impressions * 100) if impressions > 0 else 0,
-            "cvr": (installs / taps * 100) if taps > 0 else 0,
-            "cpa": (spend / installs) if installs > 0 else float("inf"),
-        })
+        keywords.append(
+            {
+                "keyword": metadata.get("keyword", "?"),
+                "match_type": metadata.get("matchType", "?"),
+                "impressions": impressions,
+                "taps": taps,
+                "installs": installs,
+                "spend": spend,
+                "ttr": (taps / impressions * 100) if impressions > 0 else 0,
+                "cvr": (installs / taps * 100) if taps > 0 else 0,
+                "cpa": (spend / installs) if installs > 0 else float("inf"),
+            }
+        )
 
     # Sort
     sort_key = {
@@ -353,7 +530,9 @@ def report_keywords(
 def report_adgroups(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     days: int = typer.Option(30, "--days", "-d", help="Number of days"),
-    all_campaigns: bool = typer.Option(False, "--all", "-a", help="Show ad groups for all campaigns"),
+    all_campaigns: bool = typer.Option(
+        False, "--all", "-a", help="Show ad groups for all campaigns"
+    ),
 ):
     """Show ad group performance report."""
     credentials = load_credentials()
@@ -372,7 +551,9 @@ def report_adgroups(
 
     def _filter_by_app(campaigns: list) -> list:
         if app_name:
-            return [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+            return [
+                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+            ]
         return campaigns
 
     if all_campaigns:
@@ -416,8 +597,7 @@ def report_adgroups(
 
     console.print(
         Panel(
-            f"[bold]Ad Group Performance[/bold]\n"
-            f"Last {days} days",
+            f"[bold]Ad Group Performance[/bold]\n" f"Last {days} days",
             expand=False,
         )
     )
@@ -464,7 +644,9 @@ def report_adgroups(
             cvr = (installs / taps * 100) if taps > 0 else 0
             cpa = (spend / installs) if installs > 0 else 0
 
-            status_style = "green" if ag_status == "ENABLED" else "yellow" if ag_status == "PAUSED" else "dim"
+            status_style = (
+                "green" if ag_status == "ENABLED" else "yellow" if ag_status == "PAUSED" else "dim"
+            )
 
             table.add_row(
                 ag_name[:25],
@@ -484,9 +666,21 @@ def report_adgroups(
             campaign_totals["spend"] += spend
 
         # Add campaign totals
-        total_ttr = (campaign_totals["taps"] / campaign_totals["impressions"] * 100) if campaign_totals["impressions"] > 0 else 0
-        total_cvr = (campaign_totals["installs"] / campaign_totals["taps"] * 100) if campaign_totals["taps"] > 0 else 0
-        total_cpa = (campaign_totals["spend"] / campaign_totals["installs"]) if campaign_totals["installs"] > 0 else 0
+        total_ttr = (
+            (campaign_totals["taps"] / campaign_totals["impressions"] * 100)
+            if campaign_totals["impressions"] > 0
+            else 0
+        )
+        total_cvr = (
+            (campaign_totals["installs"] / campaign_totals["taps"] * 100)
+            if campaign_totals["taps"] > 0
+            else 0
+        )
+        total_cpa = (
+            (campaign_totals["spend"] / campaign_totals["installs"])
+            if campaign_totals["installs"] > 0
+            else 0
+        )
 
         table.add_row(
             "[bold]Total[/bold]",
@@ -497,7 +691,11 @@ def report_adgroups(
             f"[bold]{format_number(campaign_totals['installs'])}[/bold]",
             f"[bold]{total_cvr:.1f}%[/bold]",
             f"[bold]{format_currency(campaign_totals['spend'])}[/bold]",
-            f"[bold]{format_currency(total_cpa)}[/bold]" if campaign_totals["installs"] > 0 else "-",
+            (
+                f"[bold]{format_currency(total_cpa)}[/bold]"
+                if campaign_totals["installs"] > 0
+                else "-"
+            ),
         )
 
         console.print(table)
@@ -508,10 +706,16 @@ def report_adgroups(
 def report_impression_share(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     days: int = typer.Option(30, "--days", "-d", help="Number of days"),
-    min_impressions: int = typer.Option(100, "--min-impressions", help="Minimum impressions filter"),
-    sort_by: str = typer.Option("impressions", "--sort", "-s", help="Sort by: impressions, taps, spend, ttr"),
+    min_impressions: int = typer.Option(
+        100, "--min-impressions", help="Minimum impressions filter"
+    ),
+    sort_by: str = typer.Option(
+        "impressions", "--sort", "-s", help="Sort by: impressions, taps, spend, ttr"
+    ),
     limit: int = typer.Option(50, "--limit", "-l", help="Max keywords to show"),
-    all_campaigns: bool = typer.Option(False, "--all", "-a", help="Show impression share for all campaigns"),
+    all_campaigns: bool = typer.Option(
+        False, "--all", "-a", help="Show impression share for all campaigns"
+    ),
 ):
     """Show impression share (Share of Voice) report for keywords.
 
@@ -535,7 +739,9 @@ def report_impression_share(
 
     def _filter_by_app(campaigns: list) -> list:
         if app_name:
-            return [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+            return [
+                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+            ]
         return campaigns
 
     if all_campaigns:
@@ -617,18 +823,20 @@ def report_impression_share(
             cvr = (installs / taps * 100) if taps > 0 else 0
             cpa = (spend / installs) if installs > 0 else 0
 
-            keywords.append({
-                "keyword": metadata.get("keyword", "?"),
-                "match_type": metadata.get("matchType", "?"),
-                "status": metadata.get("keywordStatus", "?"),
-                "impressions": impressions,
-                "taps": taps,
-                "ttr": ttr,
-                "installs": installs,
-                "cvr": cvr,
-                "spend": spend,
-                "cpa": cpa,
-            })
+            keywords.append(
+                {
+                    "keyword": metadata.get("keyword", "?"),
+                    "match_type": metadata.get("matchType", "?"),
+                    "status": metadata.get("keywordStatus", "?"),
+                    "impressions": impressions,
+                    "taps": taps,
+                    "ttr": ttr,
+                    "installs": installs,
+                    "cvr": cvr,
+                    "spend": spend,
+                    "cpa": cpa,
+                }
+            )
 
         # Sort
         sort_key = {
@@ -645,7 +853,9 @@ def report_impression_share(
             console.print(f"[yellow]{ctype}: No keywords met filter criteria[/yellow]")
             continue
 
-        table = Table(title=f"{ctype} - Impression Share", show_header=True, header_style="bold magenta")
+        table = Table(
+            title=f"{ctype} - Impression Share", show_header=True, header_style="bold magenta"
+        )
         table.add_column("Keyword")
         table.add_column("Match", style="dim")
         table.add_column("Status")
@@ -665,7 +875,11 @@ def report_impression_share(
 
         for kw in keywords:
             # Impression share within this campaign (relative to top keyword)
-            status_style = "green" if kw["status"] == "ACTIVE" else "yellow" if kw["status"] == "PAUSED" else "dim"
+            status_style = (
+                "green"
+                if kw["status"] == "ACTIVE"
+                else "yellow" if kw["status"] == "PAUSED" else "dim"
+            )
 
             # Color TTR based on performance
             ttr_str = f"{kw['ttr']:.1f}%"
@@ -708,11 +922,17 @@ def report_impression_share(
         console.print(table)
 
         # Insights
-        high_ttr_low_impr = [k for k in keywords if k["ttr"] >= 8 and k["impressions"] < total_impressions * 0.1]
+        high_ttr_low_impr = [
+            k for k in keywords if k["ttr"] >= 8 and k["impressions"] < total_impressions * 0.1
+        ]
         if high_ttr_low_impr:
-            console.print("\n[bold cyan]💡 Opportunity:[/bold cyan] Keywords with high TTR but low impression share:")
+            console.print(
+                "\n[bold cyan]💡 Opportunity:[/bold cyan] Keywords with high TTR but low impression share:"
+            )
             for kw in high_ttr_low_impr[:3]:
-                console.print(f"  • {kw['keyword']} (TTR: {kw['ttr']:.1f}%) - Consider increasing bid")
+                console.print(
+                    f"  • {kw['keyword']} (TTR: {kw['ttr']:.1f}%) - Consider increasing bid"
+                )
 
         console.print()
 
@@ -724,8 +944,12 @@ def report_search_terms(
     min_impressions: Optional[int] = typer.Option(
         None, "--min-impressions", help="Minimum impressions filter"
     ),
-    show_winners: bool = typer.Option(False, "--winners", "-w", help="Show potential keywords to promote"),
-    show_negatives: bool = typer.Option(False, "--negatives", "-n", help="Show potential negative keywords"),
+    show_winners: bool = typer.Option(
+        False, "--winners", "-w", help="Show potential keywords to promote"
+    ),
+    show_negatives: bool = typer.Option(
+        False, "--negatives", "-n", help="Show potential negative keywords"
+    ),
     limit: int = typer.Option(50, "--limit", "-l", help="Max terms to show"),
     rules_file: Optional[Path] = typer.Option(
         None, "--rules", help="JSON or YAML rule file overriding app config defaults"
@@ -765,7 +989,9 @@ def report_search_terms(
 
         # Filter to current app in multi-app mode
         if app_name:
-            campaigns = [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+            campaigns = [
+                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+            ]
 
         discovery = None
         for c in campaigns:
@@ -827,17 +1053,19 @@ def report_search_terms(
 
         # searchTermText may be None for keyword-level data; use keyword as fallback
         term_text = metadata.get("searchTermText") or metadata.get("keyword") or "?"
-        terms.append({
-            "term": term_text,
-            "source": metadata.get("searchTermSource", "?"),
-            "impressions": impressions,
-            "taps": taps,
-            "installs": installs,
-            "spend": spend,
-            "ttr": (taps / impressions * 100) if impressions > 0 else 0,
-            "cvr": (installs / taps * 100) if taps > 0 else 0,
-            "cpa": (spend / installs) if installs > 0 else float("inf"),
-        })
+        terms.append(
+            {
+                "term": term_text,
+                "source": metadata.get("searchTermSource", "?"),
+                "impressions": impressions,
+                "taps": taps,
+                "installs": installs,
+                "spend": spend,
+                "ttr": (taps / impressions * 100) if impressions > 0 else 0,
+                "cvr": (installs / taps * 100) if taps > 0 else 0,
+                "cpa": (spend / installs) if installs > 0 else float("inf"),
+            }
+        )
 
     if show_winners:
         # Filter to terms with installs and reasonable CPA
@@ -857,7 +1085,10 @@ def report_search_terms(
         title = "Search Terms"
 
     console.print(
-        Panel(f"[bold]{title}[/bold]\nLast {days} days • Min impressions: {min_impressions}", expand=False)
+        Panel(
+            f"[bold]{title}[/bold]\nLast {days} days • Min impressions: {min_impressions}",
+            expand=False,
+        )
     )
 
     table = Table(show_header=True, header_style="bold magenta")
@@ -880,7 +1111,9 @@ def report_search_terms(
         else:
             term_style = ""
 
-        term_display = f"[{term_style}]{t['term'][:35]}[/{term_style}]" if term_style else t["term"][:35]
+        term_display = (
+            f"[{term_style}]{t['term'][:35]}[/{term_style}]" if term_style else t["term"][:35]
+        )
 
         table.add_row(
             term_display,
@@ -965,7 +1198,9 @@ def report_custom(
         raise typer.Exit(1)
 
     if state != "COMPLETED":
-        console.print(f"[yellow]Report still processing after {max_polls * 10}s (state: {state}).[/yellow]")
+        console.print(
+            f"[yellow]Report still processing after {max_polls * 10}s (state: {state}).[/yellow]"
+        )
         console.print(f"Check later with: [cyan]asa reports custom-get {report_id}[/cyan]")
         return
 
@@ -1015,10 +1250,9 @@ def report_custom_list():
     for report in reports:
         state = report.get("state", "?")
         state_style = (
-            "green" if state == "COMPLETED"
-            else "yellow" if state == "QUEUED"
-            else "blue" if state == "RUNNING"
-            else "red"
+            "green"
+            if state == "COMPLETED"
+            else "yellow" if state == "QUEUED" else "blue" if state == "RUNNING" else "red"
         )
 
         table.add_row(
@@ -1054,17 +1288,18 @@ def report_custom_get(
 
     state = report.get("state", "UNKNOWN")
     state_style = (
-        "green" if state == "COMPLETED"
-        else "yellow" if state == "QUEUED"
-        else "blue" if state == "RUNNING"
-        else "red"
+        "green"
+        if state == "COMPLETED"
+        else "yellow" if state == "QUEUED" else "blue" if state == "RUNNING" else "red"
     )
 
-    console.print(Panel(
-        f"[bold]Custom Report: {report.get('name', '?')}[/bold]\n"
-        f"State: [{state_style}]{state}[/{state_style}]",
-        expand=False,
-    ))
+    console.print(
+        Panel(
+            f"[bold]Custom Report: {report.get('name', '?')}[/bold]\n"
+            f"State: [{state_style}]{state}[/{state_style}]",
+            expand=False,
+        )
+    )
 
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Field")
@@ -1083,7 +1318,9 @@ def report_custom_get(
 def report_ads(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     days: int = typer.Option(14, "--days", "-d", help="Number of days"),
-    all_campaigns: bool = typer.Option(False, "--all", "-a", help="Show ad report for all campaigns"),
+    all_campaigns: bool = typer.Option(
+        False, "--all", "-a", help="Show ad report for all campaigns"
+    ),
 ):
     """Show ad-level performance report."""
     credentials = load_credentials()
@@ -1102,7 +1339,9 @@ def report_ads(
 
     def _filter_by_app(campaigns: list) -> list:
         if app_name:
-            return [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+            return [
+                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+            ]
         return campaigns
 
     if all_campaigns:
@@ -1191,7 +1430,9 @@ def report_ads(
             cvr = (installs / taps * 100) if taps > 0 else 0
             cpa = (spend / installs) if installs > 0 else 0
 
-            status_style = "green" if ad_status == "ENABLED" else "yellow" if ad_status == "PAUSED" else "dim"
+            status_style = (
+                "green" if ad_status == "ENABLED" else "yellow" if ad_status == "PAUSED" else "dim"
+            )
 
             table.add_row(
                 ad_name[:30],
@@ -1255,7 +1496,9 @@ def report_bid_recommendations(
 
     def _filter_by_app(campaigns: list) -> list:
         if app_name:
-            return [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+            return [
+                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
+            ]
         return campaigns
 
     if all_campaigns:
@@ -1331,7 +1574,9 @@ def report_bid_recommendations(
             if output_json:
                 report_data = client.get_keyword_adgroup_report(cid, ag_id, start, end)
             else:
-                with console.status(f"[bold blue]Fetching keyword report for {cname} / {ag_name}..."):
+                with console.status(
+                    f"[bold blue]Fetching keyword report for {cname} / {ag_name}..."
+                ):
                     report_data = client.get_keyword_adgroup_report(cid, ag_id, start, end)
 
             if not report_data:
@@ -1360,16 +1605,18 @@ def report_bid_recommendations(
                 taps = metrics.get("taps", 0)
                 installs = metrics.get("totalInstalls", 0) or metrics.get("tapInstalls", 0)
 
-                rows.append({
-                    "keyword": keyword,
-                    "keyword_id": keyword_id,
-                    "current_bid": current_bid,
-                    "suggested_bid": suggested_bid,
-                    "difference": suggested_bid - current_bid,
-                    "impressions": impressions,
-                    "taps": taps,
-                    "installs": installs,
-                })
+                rows.append(
+                    {
+                        "keyword": keyword,
+                        "keyword_id": keyword_id,
+                        "current_bid": current_bid,
+                        "suggested_bid": suggested_bid,
+                        "difference": suggested_bid - current_bid,
+                        "impressions": impressions,
+                        "taps": taps,
+                        "installs": installs,
+                    }
+                )
                 keyword_rows.append(
                     keyword_report_row_to_metrics(row, campaign=campaign, ad_group=ag)
                 )
@@ -1414,7 +1661,9 @@ def report_bid_recommendations(
                         diff_str = f"[{bid_style}]-{format_currency(diff)}[/{bid_style}]"
 
                     current_str = format_currency(r["current_bid"]) if r["current_bid"] > 0 else "-"
-                    suggested_str = format_currency(r["suggested_bid"]) if r["suggested_bid"] > 0 else "-"
+                    suggested_str = (
+                        format_currency(r["suggested_bid"]) if r["suggested_bid"] > 0 else "-"
+                    )
 
                     table.add_row(
                         r["keyword"][:30],

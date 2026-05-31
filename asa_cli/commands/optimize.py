@@ -80,6 +80,7 @@ class AnalysisResult:
     def __init__(self):
         self.winners: list[dict] = []
         self.losers: list[dict] = []
+        self.costly: list[dict] = []
         self.total_terms: int = 0
         self.skipped_no_text: int = 0
         self.skipped_no_activity: int = 0
@@ -147,6 +148,19 @@ def analyze_search_terms(
         term_data = {
             "term": term_text,
             "source": metadata.get("searchTermSource", "?"),
+            "campaign_id": metadata.get("campaignId"),
+            "campaign_name": metadata.get("campaignName"),
+            "ad_group_id": metadata.get("adGroupId"),
+            "ad_group_name": metadata.get("adGroupName"),
+            "keyword_id": metadata.get("keywordId"),
+            "keyword": metadata.get("keyword"),
+            "keyword_match_type": metadata.get("matchType"),
+            "current_bid": (
+                float(metadata["bidAmount"]["amount"])
+                if isinstance(metadata.get("bidAmount"), dict)
+                and metadata["bidAmount"].get("amount") is not None
+                else None
+            ),
             "impressions": impressions,
             "taps": taps,
             "installs": installs,
@@ -156,10 +170,13 @@ def analyze_search_terms(
 
         if installs >= min_installs and term_data["cpa"] <= cpa_threshold:
             result.winners.append(term_data)
+        elif installs > 0 and term_data["cpa"] > cpa_threshold:
+            result.costly.append(term_data)
         elif installs == 0 and spend >= min_spend:
             result.losers.append(term_data)
 
     result.winners.sort(key=lambda x: x["cpa"])
+    result.costly.sort(key=lambda x: -x["spend"])
     result.losers.sort(key=lambda x: -x["spend"])
 
     return result
@@ -268,11 +285,15 @@ def execute_promotions(
         )
 
     if added and len(added) > 0:
-        console.print(f"[green]✓ Added {len(added)} keywords to {target_campaign.get('name')}[/green]")
+        console.print(
+            f"[green]✓ Added {len(added)} keywords to {target_campaign.get('name')}[/green]"
+        )
     elif errors:
         all_duplicates = all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors)
         if all_duplicates:
-            console.print(f"[dim]↳ {len(errors)} keywords already exist in {target_campaign.get('name')}[/dim]")
+            console.print(
+                f"[dim]↳ {len(errors)} keywords already exist in {target_campaign.get('name')}[/dim]"
+            )
             # Continue with negative keyword addition even if duplicates
             added = keyword_list  # Treat as success for flow purposes
         else:
@@ -293,7 +314,9 @@ def execute_promotions(
         if all_duplicates:
             console.print(f"[dim]↳ {len(neg_errors)} negatives already exist in Discovery[/dim]")
         else:
-            console.print(f"[yellow]⚠ Could not add negatives to Discovery: {neg_errors[0].get('message', 'Unknown error')}[/yellow]")
+            console.print(
+                f"[yellow]⚠ Could not add negatives to Discovery: {neg_errors[0].get('message', 'Unknown error')}[/yellow]"
+            )
     else:
         console.print(f"[yellow]⚠ Could not add negatives to Discovery[/yellow]")
 
@@ -334,7 +357,9 @@ def execute_negatives(
                 console.print(f"[dim]↳ {len(errors)} negatives already exist in {cname}[/dim]")
                 success_count += 1  # Count as success since keywords are blocked
             else:
-                console.print(f"[red]✗ Failed to add negatives to {cname}: {errors[0].get('message', 'Unknown')}[/red]")
+                console.print(
+                    f"[red]✗ Failed to add negatives to {cname}: {errors[0].get('message', 'Unknown')}[/red]"
+                )
                 failure_count += 1
         else:
             console.print(f"[red]✗ Failed to add negatives to {cname}[/red]")
@@ -375,7 +400,9 @@ def resolve_optimization_settings(
         raise ValueError("Days must be a positive integer")
 
     resolved_cpa = cpa_threshold if cpa_threshold is not None else rules.optimization.cpa_threshold
-    resolved_installs = min_installs if min_installs is not None else rules.optimization.min_installs
+    resolved_installs = (
+        min_installs if min_installs is not None else rules.optimization.min_installs
+    )
     resolved_spend = (
         min_spend
         if min_spend is not None
@@ -454,9 +481,7 @@ def optimize_cmd(
     exclude_terms: Optional[str] = typer.Option(
         None, "--exclude", "-e", help="Comma-separated terms to exclude from analysis"
     ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", "-n", help="Preview changes without applying"
-    ),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview changes without applying"),
     auto_approve: bool = typer.Option(
         False, "--auto-approve", "-y", help="Skip confirmation prompts"
     ),
@@ -553,7 +578,9 @@ def optimize_cmd(
         if output_json:
             print(json.dumps({"error": f"Invalid target type: {target}"}))
         else:
-            console.print(f"[red]Invalid target type: {target}. Use brand, category, or competitor.[/red]")
+            console.print(
+                f"[red]Invalid target type: {target}. Use brand, category, or competitor.[/red]"
+            )
         raise typer.Exit(1)
 
     target_type = target_type_map[target.lower()]
@@ -584,7 +611,9 @@ def optimize_cmd(
             print(json.dumps({"error": f"No {target_type.value} campaign found"}))
         else:
             console.print(f"[red]No {target_type.value} campaign found.[/red]")
-            console.print(f"[yellow]Tip: Create a campaign with '{target_type.value}' in the name.[/yellow]")
+            console.print(
+                f"[yellow]Tip: Create a campaign with '{target_type.value}' in the name.[/yellow]"
+            )
         raise typer.Exit(1)
 
     if not output_json:
@@ -656,31 +685,34 @@ def optimize_cmd(
         console.print("[dim]Apply with: asa apply {path}[/dim]".format(path=out))
         return
 
-    display_optimization_summary(
-        winners, losers, discovery_campaign, target_campaign, days
-    )
+    display_optimization_summary(winners, losers, discovery_campaign, target_campaign, days)
 
     analyzed_count = analysis.total_terms - analysis.skipped_no_text - analysis.skipped_no_activity
-    console.print(f"\n[dim]Analysis: {analysis.total_terms} terms from API, "
-                  f"{analyzed_count} analyzed, "
-                  f"{analysis.skipped_no_text} skipped (no text), "
-                  f"{analysis.skipped_no_activity} skipped (no activity)[/dim]")
+    console.print(
+        f"\n[dim]Analysis: {analysis.total_terms} terms from API, "
+        f"{analyzed_count} analyzed, "
+        f"{analysis.skipped_no_text} skipped (no text), "
+        f"{analysis.skipped_no_activity} skipped (no activity)[/dim]"
+    )
 
     if not winners and not losers:
         console.print("\n[yellow]No optimization actions to take.[/yellow]")
         if analysis.skipped_no_text > 0:
-            console.print("[dim]Note: Some Search Match terms don't expose their text in Apple's API.[/dim]")
+            console.print(
+                "[dim]Note: Some Search Match terms don't expose their text in Apple's API.[/dim]"
+            )
         return
 
     if dry_run:
-        console.print("\n[yellow][DRY RUN] No changes applied. Remove --dry-run to execute.[/yellow]")
+        console.print(
+            "\n[yellow][DRY RUN] No changes applied. Remove --dry-run to execute.[/yellow]"
+        )
         return
 
     if not auto_approve:
         console.print()
         if not Confirm.ask(
-            f"[bold]Apply changes?[/bold] "
-            f"({len(winners)} promotions, {len(losers)} negatives)"
+            f"[bold]Apply changes?[/bold] " f"({len(winners)} promotions, {len(losers)} negatives)"
         ):
             console.print("[yellow]Cancelled.[/yellow]")
             return

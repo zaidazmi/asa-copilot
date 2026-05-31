@@ -2,28 +2,29 @@
 
 Apple Search Ads operations from the command line.
 
-`asa-copilot` is a practical CLI for indie iOS developers and small growth teams who want to manage Apple Search Ads without living in spreadsheets or clicking through Ads Manager all day. It helps you set up campaign structure, inspect account health, manage keywords, review search-term data, generate change plans, and apply spend-affecting actions with an audit trail.
+`asa-copilot` is an operations CLI for indie iOS developers and small growth teams running Apple Search Ads. It helps you configure apps, audit account structure, mine search terms, manage keywords, pace budgets, and turn optimization ideas into reviewable plans before anything changes in your account.
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Ads API v5](https://img.shields.io/badge/Apple%20Ads%20API-v5-black.svg)](https://developer.apple.com/documentation/apple_ads)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ```bash
-asa optimize --lookback 14d --rules asa-rules.json --out plan.json
-asa plan show plan.json
-asa apply plan.json
+asa search-terms mine --lookback 14d --out search-term-plan.json
+asa plan show search-term-plan.json
+asa apply search-term-plan.json
 ```
 
-## What It Does
+## Why It Exists
 
-`asa-copilot` is built around an operator workflow:
+Apple Ads Manager is good for inspection, but repeated account operations get messy quickly: checking structure, finding wasted search terms, avoiding duplicate keyword spend, adjusting bids, and making sure budget is going to campaigns that actually work.
 
-1. Configure one or more apps.
-2. Audit campaign structure and serving status.
-3. Mine keywords and search terms.
-4. Generate a reviewable plan for spend-affecting changes.
-5. Apply approved changes and keep local history.
-6. Repeat with configurable rules.
+`asa-copilot` turns those tasks into a safer operator loop:
+
+1. Pull account and report data.
+2. Apply configurable rules.
+3. Produce a reviewable change plan.
+4. Apply only what you approve.
+5. Keep a local audit history.
 
 The CLI command is intentionally short:
 
@@ -31,21 +32,20 @@ The CLI command is intentionally short:
 asa --help
 ```
 
-## Highlights
+## Core Features
 
-- Multi-app configuration with `asa --app <slug> ...`
-- Apple Ads API credential setup and connection testing
-- Campaign create, clone, update, pause, enable, audit, and delete
-- Keyword routing for brand, category, competitor, and discovery campaigns
-- Negative keyword management at campaign and ad group levels
-- Search-term reporting for winners and negatives
-- Plan / approve / apply flow for optimization changes
-- Local audit history for applied plans
-- JSON/YAML rule files for thresholds and guardrails
-- Bid-change caps and typed optimization defaults
-- Budget order and campaign budget health views
-- Geo targeting inspection and updates
-- Ad, creative, product page, rejection, ACL, and app eligibility commands
+| Area | What it does |
+| --- | --- |
+| Multi-app config | Manage multiple apps and switch with `asa --app <slug> ...` |
+| Plan / apply safety | Save proposed spend-affecting changes to JSON, review them, then apply |
+| Search-term mining | Promote winners, block losers, and protect Discovery with negatives |
+| Guide hygiene | Detect duplicate active keywords, missing Discovery negatives, Search Match drift, and multi-country drift |
+| Optimization rules | Raise/lower bids, pause poor keywords, add negatives, and promote terms using configurable thresholds |
+| Operator reports | Daily and weekly briefs with spend, installs, CPA, winners, losers, pacing issues, and next actions |
+| Budget pacing | Recommend budget increases for capped winners and cuts for inefficient campaigns |
+| Campaign tools | Create, clone, update, pause, enable, audit, and list campaigns |
+| Keyword tools | Add, route, find, list, promote, bid-update, and manage negative keywords |
+| Account tools | ACL, app search, eligibility, geo targeting, ads, creatives, product pages, and rejection checks |
 
 ## Install
 
@@ -56,15 +56,16 @@ pip install -e .
 asa --help
 ```
 
-You can also run through `uv` if you prefer:
+For development:
 
 ```bash
-uv run asa --help
+pip install -e ".[dev]"
+pytest
 ```
 
 ## Configure
 
-Start with your Apple Ads API credentials and app metadata:
+Run the guided setup:
 
 ```bash
 asa config setup
@@ -72,7 +73,7 @@ asa config test
 asa config show
 ```
 
-Credentials and app config are stored locally:
+Local files live under:
 
 ```text
 ~/.asa-cli/
@@ -82,9 +83,9 @@ Credentials and app config are stored locally:
 `-- applied-plans.jsonl
 ```
 
-`credentials.json` contains sensitive API credentials. Keep it local.
+`credentials.json` contains sensitive Apple Ads API credentials. Keep it local and out of git.
 
-### Apple Ads API Credentials
+### API Credentials
 
 In Apple Ads, open Account Settings, then API. Create or use an API user, upload your public key, and collect:
 
@@ -101,19 +102,20 @@ openssl ecparam -genkey -name prime256v1 -noout -out apple-ads-private-key.pem
 openssl ec -in apple-ads-private-key.pem -pubout -out apple-ads-public-key.pem
 ```
 
-Upload only the public key to Apple. Use the private key path in `asa config setup`.
+Upload only the public key to Apple. Use the private key path during `asa config setup`.
 
-## Core Workflow
+## The Operator Workflow
 
-### 1. Audit
+### 1. Inspect The Account
 
 ```bash
 asa campaigns list --all
 asa campaigns audit
 asa budget status
+asa report weekly
 ```
 
-Use this to see what exists, what is paused or on hold, and whether campaigns match the expected structure.
+Use this to understand campaign status, budget health, and recent performance before making changes.
 
 ### 2. Manage Campaigns
 
@@ -127,27 +129,30 @@ asa campaigns pause 123456789
 asa campaigns enable 123456789
 ```
 
-Campaign operations are explicit by default. Use IDs when changing live objects.
+Campaign operations are explicit by default. Use campaign IDs when changing live objects.
 
 ### 3. Manage Keywords
 
 ```bash
 asa keywords add "ai note taker,voice notes" --type category
 asa keywords add "competitor app,another app" --type competitor
+asa keywords add-negatives "free games,testflight" --all
 
 asa keywords list --campaign 123456789
 asa keywords find "notes"
 asa keywords update-bids-bulk --campaign 123456789 --bid 1.25
 ```
 
-Keyword routing understands the campaign type:
+Keyword routing understands the standard Search Results structure:
 
 - brand terms go to brand exact campaigns
 - category terms go to category exact campaigns
 - competitor terms go to competitor exact campaigns
-- discovery receives broad coverage and/or negatives where appropriate
+- discovery receives broad coverage and negatives where appropriate
 
 ### 4. Mine Search Terms
+
+Inspect raw search-term data:
 
 ```bash
 asa reports search-terms --campaign 123456789 --days 14
@@ -155,23 +160,31 @@ asa reports search-terms --winners
 asa reports search-terms --negatives
 ```
 
-Search-term reports help identify:
+Generate a reviewable mining plan:
 
-- terms worth promoting into exact campaigns
-- terms spending without installs
-- queries that should be blocked as negatives
+```bash
+asa search-terms mine --lookback 14d --out search-term-plan.json
+asa plan show search-term-plan.json
+```
 
-### 5. Plan, Review, Apply
+`asa search-terms mine` can:
+
+- promote winning Discovery terms into exact campaigns
+- add promoted terms as Discovery negatives
+- add inefficient terms as negatives
+- lower related keyword bids when search-term CPA is too high
+- pause exact keywords that spent with no installs
+- include guide hygiene checks for duplicate keywords, missing Discovery negatives, Search Match drift, and multi-country drift
+
+### 5. Review And Apply Plans
 
 For spend-affecting optimization, prefer a plan first:
 
 ```bash
-asa optimize --lookback 14d --out plan.json
-asa plan show plan.json
-asa apply plan.json
+asa optimize --lookback 14d --out optimize-plan.json
+asa plan show optimize-plan.json
+asa apply optimize-plan.json
 ```
-
-`asa optimize` can still run interactively, but plans are the safer path. They make proposed changes visible before anything touches the account.
 
 Plan actions currently cover:
 
@@ -179,14 +192,41 @@ Plan actions currently cover:
 - add negative keywords
 - update keyword bids
 - pause keywords
-- update campaign budgets
-- creative mapping checks
+- update campaign daily budgets
+- record informational guide checks
 
-Applied plans are appended to:
+Applied plans are appended locally:
 
 ```text
 ~/.asa-cli/applied-plans.jsonl
 ```
+
+### 6. Operate Daily Or Weekly
+
+```bash
+asa report daily
+asa report weekly
+asa report weekly --json
+asa report weekly --out weekly-report.json
+```
+
+Operator reports summarize spend, taps, installs, TTR, CVR, CPA, winners, losers, pacing issues, and next actions.
+
+Budget pacing can also produce a plan:
+
+```bash
+asa budget pacing
+asa budget pacing --daily
+asa budget pacing --month
+asa budget pacing --days 7 --out budget-plan.json
+asa plan show budget-plan.json
+```
+
+Budget pacing can recommend:
+
+- raising daily budget for capped winners
+- lowering daily budget for inefficient campaigns
+- investigating campaigns with under-delivery and low impression volume
 
 ## Rules
 
@@ -243,17 +283,20 @@ Use the same file across commands:
 
 ```bash
 asa optimize --rules asa-rules.json --out plan.json
-asa reports summary --rules asa-rules.json
-asa reports search-terms --rules asa-rules.json
+asa search-terms mine --rules asa-rules.json --out search-term-plan.json
+asa report weekly --rules asa-rules.json
 asa reports bid-recommendations --rules asa-rules.json --out bid-plan.json
-asa budget status --rules asa-rules.json
+asa budget pacing --rules asa-rules.json --out budget-plan.json
 ```
 
 Rules can be JSON or YAML. CLI flags still override rule defaults for one-off runs.
 
-## Reporting
+## Reporting Commands
 
 ```bash
+asa report daily
+asa report weekly
+
 asa reports summary --days 7
 asa reports keywords --sort cpa
 asa reports search-terms --winners
@@ -271,16 +314,19 @@ asa reports custom-list
 asa reports custom-get <REPORT_ID>
 ```
 
-## Budgets
+Both `asa report ...` and `asa reports ...` are available. The singular group is intended for operator briefs; the plural group keeps the broader reporting commands.
+
+## Budget Commands
 
 ```bash
 asa budget list
 asa budget get <BUDGET_ORDER_ID>
 asa budget status --rules asa-rules.json
+asa budget pacing --days 7 --out budget-plan.json
 asa budget create --name "June 2026" --budget 5000 --start 2026-06-01 --end 2026-06-30
 ```
 
-Budget status highlights serving and budget problems across campaigns.
+Budget status highlights serving and budget problems. Budget pacing turns recent spend quality into plan actions.
 
 ## Geo, Ads, And Account Tools
 
@@ -318,7 +364,8 @@ Run any command against a specific app:
 
 ```bash
 asa --app noteo campaigns list --all
-asa --app lofto optimize --out lofto-plan.json
+asa --app lofto search-terms mine --out lofto-search-plan.json
+asa --app lofto budget pacing --days 7
 ```
 
 ## Campaign Strategy
@@ -327,37 +374,33 @@ The default strategy is built around Search Results campaigns:
 
 | Type | Purpose | Match |
 | --- | --- | --- |
-| Brand | protect your own brand searches | exact |
-| Category | controlled high-intent category terms | exact |
-| Competitor | competitor app or brand terms | exact |
-| Discovery | find new terms and test wider intent | broad / Search Match |
+| Brand | Protect your own brand searches | Exact |
+| Category | Control high-intent category terms | Exact |
+| Competitor | Test competitor app or brand terms | Exact |
+| Discovery | Find new terms and test wider intent | Broad / Search Match |
 
-The practical rule is simple: keep high-value exact terms controlled, use discovery to learn, and avoid bidding against yourself by duplicating the same active keyword intent in multiple places.
+The practical rule is simple: keep high-value exact terms controlled, use Discovery to learn, and avoid bidding against yourself by duplicating the same active keyword intent in multiple places.
 
 ## Safety Model
 
 `asa-copilot` treats account changes as operations, not magic.
 
+- spend-affecting recommendations can be saved as plans first
 - destructive actions require explicit commands
-- optimization can emit a reviewable plan before applying
 - duplicate keyword errors are handled without failing the whole run
+- bid rules can cap aggressive changes
 - credentials stay in local config files
 - applied plans are recorded locally
-- bid rules can cap aggressive changes
+- JSON output is available for automation and scheduled runs
 
-## Development
+## Local Checks
 
 ```bash
-pip install -e ".[dev]"
 pytest
-```
-
-Useful local checks:
-
-```bash
-asa --help
-asa config rules-template --output /tmp/asa-rules.json --force
-asa optimize --help
+python -m py_compile $(find asa_cli -name '*.py' -print)
+python -m asa_cli.main search-terms mine --help
+python -m asa_cli.main report weekly --help
+python -m asa_cli.main budget pacing --help
 ```
 
 ## License

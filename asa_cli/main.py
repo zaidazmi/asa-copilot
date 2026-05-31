@@ -7,7 +7,20 @@ from rich.console import Console
 from rich.panel import Panel
 
 from . import __version__
-from .commands import acl, adgroups, ads, budget, campaigns, config, geo, keywords, optimize, plan, reports
+from .commands import (
+    acl,
+    adgroups,
+    ads,
+    budget,
+    campaigns,
+    config,
+    geo,
+    keywords,
+    optimize,
+    plan,
+    reports,
+    search_terms,
+)
 from .config import set_current_app
 from .api import SearchAdsClient
 from .config import load_credentials
@@ -36,6 +49,8 @@ app.add_typer(adgroups.app, name="adgroups", help="Ad group management")
 app.add_typer(keywords.app, name="keywords", help="Keyword management")
 app.add_typer(plan.app, name="plan", help="Review saved change plans")
 app.add_typer(reports.app, name="reports", help="Reporting and analytics")
+app.add_typer(reports.app, name="report", help="Reporting and analytics")
+app.add_typer(search_terms.app, name="search-terms", help="Search-term mining")
 app.add_typer(optimize.app, name="optimize", help="Automated campaign optimization")
 app.add_typer(budget.app, name="budget", help="Budget order management")
 app.add_typer(geo.app, name="geo", help="Geo targeting and location search")
@@ -106,6 +121,8 @@ reporting, keyword management, and optimization.
     asa apply plan.json         - Apply a saved plan and save audit history
 
   [bold cyan]Reports:[/bold cyan]
+    asa report daily            - Daily operator brief
+    asa report weekly           - Weekly operator brief
     asa reports summary         - Performance summary across campaigns
     asa reports keywords        - Keyword performance report
     asa reports search-terms    - Discover new keywords and negatives
@@ -119,6 +136,7 @@ reporting, keyword management, and optimization.
     asa budget list             - List budget orders
     asa budget get [ID]         - Get budget order details
     asa budget status           - Campaign budget health overview
+    asa budget pacing           - Budget pacing plan recommendations
     asa budget create           - Create a budget order
 
   [bold cyan]Geo:[/bold cyan]
@@ -142,6 +160,7 @@ reporting, keyword management, and optimization.
     asa acl countries           - List supported countries
 
   [bold cyan]Optimization:[/bold cyan]
+    asa search-terms mine       - Mine Discovery and emit a plan
     asa optimize                - Run automated optimization workflow
     asa optimize --dry-run      - Preview changes without applying
     asa optimize --days 7       - Analyze last 7 days
@@ -212,7 +231,9 @@ reporting, keyword management, and optimization.
 @app.command("apply")
 def apply_plan_cmd(
     path: str = typer.Argument(..., help="Path to a plan JSON file"),
-    auto_approve: bool = typer.Option(False, "--auto-approve", "-y", help="Skip confirmation prompt"),
+    auto_approve: bool = typer.Option(
+        False, "--auto-approve", "-y", help="Skip confirmation prompt"
+    ),
     output_json: bool = typer.Option(False, "--json", help="Output apply result as JSON"),
 ):
     """Apply a saved change plan and record it in local audit history."""
