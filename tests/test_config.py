@@ -233,6 +233,7 @@ class TestAppConfig:
         assert config.campaign_strategy.strategy == "four_campaigns"
         assert config.optimization.cpa_threshold == 5.0
         assert config.bids.max_bid_change_pct == 25.0
+        assert config.bids.bid_adjustment_pct == 10.0
         assert config.reporting.search_terms_days == 14
 
     def test_save_and_load_app_config(self):

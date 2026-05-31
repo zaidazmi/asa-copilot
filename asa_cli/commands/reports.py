@@ -1,5 +1,6 @@
 """Reporting commands."""
 
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,8 @@ from ..config import (
     load_rules,
     parse_campaign_name,
 )
+from ..plans import ChangePlan, save_plan
+from ..recommendations import build_keyword_recommendations, keyword_report_row_to_metrics
 
 app = typer.Typer(help="Reporting and analytics commands")
 console = Console()
@@ -1211,6 +1214,13 @@ def report_bid_recommendations(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     days: int = typer.Option(14, "--days", "-d", help="Number of days"),
     all_campaigns: bool = typer.Option(False, "--all", "-a", help="Show bids for all campaigns"),
+    rules_file: Optional[Path] = typer.Option(
+        None, "--rules", help="JSON or YAML rule file overriding app config defaults"
+    ),
+    output_json: bool = typer.Option(False, "--json", help="Output rule recommendations as JSON"),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Write bid/pause recommendations to a plan JSON file"
+    ),
 ):
     """Show Apple's suggested bid amounts vs current bids for keywords.
 
@@ -1223,6 +1233,16 @@ def report_bid_recommendations(
         console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
 
+    app_config = get_current_app_config()
+    try:
+        rules = load_rules(rules_file, app_config=app_config)
+    except RulesLoadError as exc:
+        if output_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
     client = SearchAdsClient(credentials)
 
     end = datetime.now()
@@ -1231,6 +1251,7 @@ def report_bid_recommendations(
     # Get campaigns to report on
     campaigns_to_report = []
     app_name = _resolve_app_name()
+    keyword_rows = []
 
     def _filter_by_app(campaigns: list) -> list:
         if app_name:
@@ -1276,12 +1297,13 @@ def report_bid_recommendations(
             console.print("[red]Invalid selection.[/red]")
             return
 
-    console.print(
-        Panel(
-            f"[bold]Bid Recommendations[/bold]\nLast {days} days",
-            expand=False,
+    if not output_json:
+        console.print(
+            Panel(
+                f"[bold]Bid Recommendations[/bold]\nLast {days} days",
+                expand=False,
+            )
         )
-    )
 
     total_keywords = 0
     below_suggestion = 0
@@ -1291,20 +1313,26 @@ def report_bid_recommendations(
         cname = campaign.get("name", "Unknown")
         ctype = get_campaign_type_label(cname, app_name=_resolve_app_name())
 
-        # Get ad groups for this campaign
-        with console.status(f"[bold blue]Fetching ad groups for {cname}..."):
+        if output_json:
             ad_groups = client.get_ad_groups(cid)
+        else:
+            with console.status(f"[bold blue]Fetching ad groups for {cname}..."):
+                ad_groups = client.get_ad_groups(cid)
 
         if not ad_groups:
-            console.print(f"[yellow]{ctype}: No ad groups found[/yellow]")
+            if not output_json:
+                console.print(f"[yellow]{ctype}: No ad groups found[/yellow]")
             continue
 
         for ag in ad_groups:
             ag_id = ag.get("id")
             ag_name = ag.get("name", "Unknown")
 
-            with console.status(f"[bold blue]Fetching keyword report for {cname} / {ag_name}..."):
+            if output_json:
                 report_data = client.get_keyword_adgroup_report(cid, ag_id, start, end)
+            else:
+                with console.status(f"[bold blue]Fetching keyword report for {cname} / {ag_name}..."):
+                    report_data = client.get_keyword_adgroup_report(cid, ag_id, start, end)
 
             if not report_data:
                 continue
@@ -1342,6 +1370,9 @@ def report_bid_recommendations(
                     "taps": taps,
                     "installs": installs,
                 })
+                keyword_rows.append(
+                    keyword_report_row_to_metrics(row, campaign=campaign, ad_group=ag)
+                )
 
             if not rows:
                 continue
@@ -1349,18 +1380,19 @@ def report_bid_recommendations(
             # Sort by difference (biggest gap first)
             rows.sort(key=lambda x: -x["difference"])
 
-            table = Table(
-                title=f"{ctype} / {ag_name} - Bid Recommendations",
-                show_header=True,
-                header_style="bold magenta",
-            )
-            table.add_column("Keyword")
-            table.add_column("Current Bid", justify="right")
-            table.add_column("Suggested Bid", justify="right")
-            table.add_column("Difference", justify="right")
-            table.add_column("Impr", justify="right")
-            table.add_column("Taps", justify="right")
-            table.add_column("Inst", justify="right")
+            if not output_json:
+                table = Table(
+                    title=f"{ctype} / {ag_name} - Bid Recommendations",
+                    show_header=True,
+                    header_style="bold magenta",
+                )
+                table.add_column("Keyword")
+                table.add_column("Current Bid", justify="right")
+                table.add_column("Suggested Bid", justify="right")
+                table.add_column("Difference", justify="right")
+                table.add_column("Impr", justify="right")
+                table.add_column("Taps", justify="right")
+                table.add_column("Inst", justify="right")
 
             for r in rows:
                 total_keywords += 1
@@ -1376,25 +1408,45 @@ def report_bid_recommendations(
                     bid_style = "red"
                     below_suggestion += 1
 
-                diff_str = f"[{bid_style}]{'+' if diff <= 0 else ''}{format_currency(abs(diff))}[/{bid_style}]"
-                if diff > 0:
-                    diff_str = f"[{bid_style}]-{format_currency(diff)}[/{bid_style}]"
+                if not output_json:
+                    diff_str = f"[{bid_style}]{'+' if diff <= 0 else ''}{format_currency(abs(diff))}[/{bid_style}]"
+                    if diff > 0:
+                        diff_str = f"[{bid_style}]-{format_currency(diff)}[/{bid_style}]"
 
-                current_str = format_currency(r["current_bid"]) if r["current_bid"] > 0 else "-"
-                suggested_str = format_currency(r["suggested_bid"]) if r["suggested_bid"] > 0 else "-"
+                    current_str = format_currency(r["current_bid"]) if r["current_bid"] > 0 else "-"
+                    suggested_str = format_currency(r["suggested_bid"]) if r["suggested_bid"] > 0 else "-"
 
-                table.add_row(
-                    r["keyword"][:30],
-                    current_str,
-                    suggested_str,
-                    diff_str,
-                    format_number(r["impressions"]),
-                    format_number(r["taps"]),
-                    format_number(r["installs"]),
-                )
+                    table.add_row(
+                        r["keyword"][:30],
+                        current_str,
+                        suggested_str,
+                        diff_str,
+                        format_number(r["impressions"]),
+                        format_number(r["taps"]),
+                        format_number(r["installs"]),
+                    )
 
-            console.print(table)
-            console.print()
+            if not output_json:
+                console.print(table)
+                console.print()
+
+    recommendations = build_keyword_recommendations(keyword_rows, rules)
+    recommendation_plan = ChangePlan(
+        source="bid-recommendations",
+        app_name=app_name,
+        lookback_days=days,
+        summary=f"{len(recommendations)} keyword bid/pause recommendations",
+        actions=[recommendation.to_plan_action() for recommendation in recommendations],
+    )
+
+    if output_json:
+        print(json.dumps(recommendation_plan.model_dump(mode="json"), indent=2))
+        return
+
+    if out:
+        save_plan(recommendation_plan, out)
+        console.print(f"[green]Recommendation plan saved to {out}[/green]")
+        console.print("[dim]Review with: asa plan show {path}[/dim]".format(path=out))
 
     # Summary
     if total_keywords > 0:
@@ -1404,7 +1456,8 @@ def report_bid_recommendations(
                 f"Total keywords: {total_keywords}\n"
                 f"Below suggestion: [{'red' if below_suggestion > 0 else 'green'}]"
                 f"{below_suggestion}[/{'red' if below_suggestion > 0 else 'green'}]\n"
-                f"At or above: [green]{total_keywords - below_suggestion}[/green]",
+                f"At or above: [green]{total_keywords - below_suggestion}[/green]\n"
+                f"Rule recommendations: {len(recommendations)}",
                 expand=False,
             )
         )

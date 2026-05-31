@@ -218,10 +218,15 @@ Example:
     "cpa_threshold": 5.0,
     "min_installs": 2,
     "min_spend": 1.0,
-    "min_impressions": 10
+    "min_impressions": 10,
+    "pause_keyword_min_spend": null,
+    "lower_bid_cpa_multiplier": 1.5,
+    "raise_bid_cpa_multiplier": 0.8,
+    "raise_bid_min_installs": 2
   },
   "bids": {
     "max_bid_change_pct": 25.0,
+    "bid_adjustment_pct": 10.0,
     "min_bid": 0.5,
     "max_bid": 3.0
   },
@@ -240,6 +245,7 @@ Use the same file across commands:
 asa optimize --rules asa-rules.json --out plan.json
 asa reports summary --rules asa-rules.json
 asa reports search-terms --rules asa-rules.json
+asa reports bid-recommendations --rules asa-rules.json --out bid-plan.json
 asa budget status --rules asa-rules.json
 ```
 

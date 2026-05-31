@@ -25,13 +25,12 @@ from ..config import (
 )
 from ..plans import (
     ChangePlan,
-    PlanAction,
-    PlanActionType,
     apply_plan,
     display_apply_result,
     save_applied_plan,
     save_plan,
 )
+from ..recommendations import build_search_term_recommendations
 
 app = typer.Typer(help="Automated campaign optimization")
 console = Console()
@@ -389,47 +388,6 @@ def resolve_optimization_settings(
     return resolved_days, resolved_cpa, resolved_installs, resolved_spend, resolved_impressions
 
 
-def _json_safe_metric(value):
-    """Return metrics in JSON-safe form, avoiding Infinity in plan files."""
-    if value == float("inf"):
-        return None
-    return value
-
-
-def _term_evidence(terms: list[dict]) -> list[dict]:
-    """Extract compact search-term evidence for plan metadata."""
-    evidence = []
-    for term in terms:
-        evidence.append(
-            {
-                "term": term.get("term"),
-                "source": term.get("source"),
-                "impressions": term.get("impressions", 0),
-                "taps": term.get("taps", 0),
-                "installs": term.get("installs", 0),
-                "spend": term.get("spend", 0),
-                "cpa": _json_safe_metric(term.get("cpa")),
-            }
-        )
-    return evidence
-
-
-def _summarize_term_evidence(terms: list[dict]) -> dict:
-    """Summarize metrics used to justify a plan action."""
-    installs = sum(term.get("installs", 0) for term in terms)
-    spend = sum(term.get("spend", 0) for term in terms)
-    taps = sum(term.get("taps", 0) for term in terms)
-    impressions = sum(term.get("impressions", 0) for term in terms)
-    return {
-        "term_count": len(terms),
-        "impressions": impressions,
-        "taps": taps,
-        "installs": installs,
-        "spend": spend,
-        "cpa": (spend / installs) if installs else None,
-    }
-
-
 def build_optimization_plan(
     client: SearchAdsClient,
     winners: list[dict],
@@ -442,88 +400,25 @@ def build_optimization_plan(
     app_name: Optional[str],
 ) -> ChangePlan:
     """Build a durable plan from optimization analysis."""
-    actions: list[PlanAction] = []
     winner_terms = [w["term"] for w in winners]
     loser_terms = [l["term"] for l in losers]
-    winner_evidence = _term_evidence(winners)
-    loser_evidence = _term_evidence(losers)
-
+    exact_ad_group = None
     if winner_terms:
         ad_groups = client.get_ad_groups(target_campaign.get("id"))
         exact_ad_group = next(
             (ag for ag in ad_groups if "Exact" in ag.get("name", "")),
             ad_groups[0] if ad_groups else None,
         )
-        if exact_ad_group:
-            actions.append(
-                PlanAction(
-                    type=PlanActionType.ADD_KEYWORDS,
-                    description=f"Promote {len(winner_terms)} discovery terms to exact keywords",
-                    campaign_id=target_campaign.get("id"),
-                    campaign_name=target_campaign.get("name"),
-                    ad_group_id=exact_ad_group.get("id"),
-                    ad_group_name=exact_ad_group.get("name"),
-                    keywords=winner_terms,
-                    match_type=MatchType.EXACT,
-                    reason=f"Search terms met winner criteria over {days} days",
-                    source="rule",
-                    before_metrics=_summarize_term_evidence(winners),
-                    metadata={
-                        "target_campaign_type": target_type.value,
-                        "search_terms": winner_evidence,
-                    },
-                )
-            )
-            actions.append(
-                PlanAction(
-                    type=PlanActionType.ADD_NEGATIVE_KEYWORDS,
-                    description=f"Add {len(winner_terms)} promoted terms as Discovery negatives",
-                    campaign_id=discovery_campaign.get("id"),
-                    campaign_name=discovery_campaign.get("name"),
-                    keywords=winner_terms,
-                    match_type=MatchType.EXACT,
-                    reason="Prevent duplicate spend after promotion",
-                    source="rule",
-                    before_metrics=_summarize_term_evidence(winners),
-                    metadata={
-                        "paired_with": "promotion",
-                        "search_terms": winner_evidence,
-                    },
-                )
-            )
-        else:
-            actions.append(
-                PlanAction(
-                    type=PlanActionType.CREATIVE_MAPPING_CHECK,
-                    description="Target campaign has no ad group for keyword promotion",
-                    campaign_id=target_campaign.get("id"),
-                    campaign_name=target_campaign.get("name"),
-                    reason="Optimization found winners but no target ad group exists",
-                    source="rule",
-                    before_metrics=_summarize_term_evidence(winners),
-                    metadata={"search_terms": winner_evidence},
-                )
-            )
-
-    if loser_terms:
-        for campaign, ctype in managed_campaigns:
-            actions.append(
-                PlanAction(
-                    type=PlanActionType.ADD_NEGATIVE_KEYWORDS,
-                    description=f"Block {len(loser_terms)} inefficient search terms",
-                    campaign_id=campaign.get("id"),
-                    campaign_name=campaign.get("name"),
-                    keywords=loser_terms,
-                    match_type=MatchType.EXACT,
-                    reason=f"Terms spent with no installs over {days} days",
-                    source="rule",
-                    before_metrics=_summarize_term_evidence(losers),
-                    metadata={
-                        "campaign_type": ctype.value,
-                        "search_terms": loser_evidence,
-                    },
-                )
-            )
+    recommendations = build_search_term_recommendations(
+        winners=winners,
+        losers=losers,
+        discovery_campaign=discovery_campaign,
+        target_campaign=target_campaign,
+        exact_ad_group=exact_ad_group,
+        managed_campaigns=managed_campaigns,
+        days=days,
+        target_type=target_type,
+    )
 
     return ChangePlan(
         source="optimize",
@@ -533,7 +428,7 @@ def build_optimization_plan(
             f"Promote {len(winner_terms)} terms to {target_type.value}; "
             f"block {len(loser_terms)} inefficient terms across managed campaigns"
         ),
-        actions=actions,
+        actions=[recommendation.to_plan_action() for recommendation in recommendations],
     )
 
 

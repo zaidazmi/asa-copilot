@@ -157,12 +157,23 @@ class OptimizationThresholds(BaseModel):
     min_spend: float = Field(1.0, ge=0)
     min_impressions: int = Field(0, ge=0)
     loser_min_spend: Optional[float] = Field(None, ge=0)
+    pause_keyword_min_spend: Optional[float] = Field(
+        None, ge=0, description="Pause active keywords with no installs after this spend"
+    )
+    lower_bid_cpa_multiplier: float = Field(
+        1.5, ge=0, description="Lower bids when CPA is this multiple over target"
+    )
+    raise_bid_cpa_multiplier: float = Field(
+        0.8, ge=0, description="Raise bids when CPA is this multiple under target"
+    )
+    raise_bid_min_installs: int = Field(2, ge=0)
 
 
 class BidRules(BaseModel):
     """Guardrails for bid changes."""
 
     max_bid_change_pct: float = Field(25.0, ge=0, le=100)
+    bid_adjustment_pct: float = Field(10.0, ge=0, le=100)
     min_bid: Optional[float] = Field(None, ge=0)
     max_bid: Optional[float] = Field(None, ge=0)
 
