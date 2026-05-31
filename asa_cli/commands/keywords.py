@@ -22,6 +22,7 @@ from ..config import (
     parse_campaign_name,
 )
 from ..decisions import log_manual_decision
+from .scope import require_campaign_in_current_app
 
 app = typer.Typer(help="Keyword management commands")
 console = Console()
@@ -127,6 +128,13 @@ def select_ad_group(client: SearchAdsClient, campaign_id: int) -> Optional[dict]
         console.print("[red]Invalid selection.[/red]")
 
 
+def resolve_campaign(client: SearchAdsClient, campaign_id: Optional[int]) -> Optional[dict]:
+    """Resolve an explicit campaign id safely, or fall back to scoped selection."""
+    if campaign_id is None:
+        return select_campaign(client)
+    return require_campaign_in_current_app(client, campaign_id)
+
+
 @app.command("list")
 def list_keywords(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
@@ -150,12 +158,10 @@ def list_keywords(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     if show_negatives:
         # Show campaign-level negative keywords
@@ -494,9 +500,7 @@ def add_negatives(
     target_campaigns = []
 
     if campaign_id:
-        campaign = client.get_campaign(campaign_id)
-        if campaign:
-            target_campaigns = [campaign]
+        target_campaigns = [require_campaign_in_current_app(client, campaign_id)]
     elif all_campaigns:
         campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
         # Include campaigns with recognized types
@@ -732,12 +736,10 @@ def delete_keywords_cmd(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     # Select ad group if not provided
     if ad_group_id is None:
@@ -833,12 +835,10 @@ def update_bid(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     # Select ad group if not provided
     if ad_group_id is None:
@@ -915,12 +915,10 @@ def pause_keyword_cmd(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     # Select ad group if not provided
     if ad_group_id is None:
@@ -1028,12 +1026,10 @@ def enable_keyword_cmd(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     # Select ad group if not provided
     if ad_group_id is None:
@@ -1228,12 +1224,10 @@ def list_negatives(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     # Fetch campaign-level negatives
     with console.status("[bold blue]Fetching campaign-level negative keywords..."):
@@ -1306,12 +1300,10 @@ def delete_negatives(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     keyword_ids = [int(id_.strip()) for id_ in ids.split(",") if id_.strip().isdigit()]
 
@@ -1358,12 +1350,10 @@ def find_keywords(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     conditions = [
         {
@@ -1420,12 +1410,10 @@ def update_bids_bulk(
 
     client = SearchAdsClient(credentials)
 
-    # Select campaign if not provided
-    if campaign_id is None:
-        campaign = select_campaign(client)
-        if not campaign:
-            return
-        campaign_id = campaign.get("id")
+    campaign = resolve_campaign(client, campaign_id)
+    if not campaign:
+        return
+    campaign_id = campaign.get("id")
 
     # Select ad group if not provided
     if ad_group_id is None:

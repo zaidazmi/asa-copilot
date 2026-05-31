@@ -13,7 +13,7 @@ Use this skill when an agent needs to inspect, plan, or operate Apple Search Ads
 - Prefer reviewable plans before changing live accounts: `--out plan.json`, `asa plan show`, then `asa apply`.
 - Every serving or spend mutation needs a clear reason. Use `--reason` for direct commands and `--note` when applying plans.
 - Treat Discovery as learning, exact campaigns as control, and negatives as guardrails against duplicate spend.
-- Use app scoping in multi-app setups: `asa --app <name> ...`.
+- Use app scoping in multi-app setups: `asa --app <name> ...`; explicit campaign IDs are blocked when their `adamId` belongs to another active app.
 - Never push live changes from reports alone; turn recommendations into a plan or use an explicit mutating command.
 
 ## Common Commands

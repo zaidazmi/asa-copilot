@@ -9,8 +9,9 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from ..api import SearchAdsClient
-from ..config import load_credentials
+from ..config import filter_campaigns_for_app, get_current_app_config, load_credentials
 from ..decisions import log_manual_decision
+from .scope import require_campaign_in_current_app
 
 app = typer.Typer(help="Geo targeting commands")
 console = Console()
@@ -85,7 +86,7 @@ def show_geo_targeting():
     client = SearchAdsClient(credentials)
 
     with console.status("[bold blue]Fetching campaigns..."):
-        campaigns = client.get_campaigns()
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
 
     if not campaigns:
         console.print("[yellow]No campaigns found.[/yellow]")
@@ -130,6 +131,7 @@ def set_geo_targeting(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    campaign = require_campaign_in_current_app(client, campaign_id)
 
     country_list = [c.strip().upper() for c in countries.split(",") if c.strip()]
 
@@ -159,6 +161,7 @@ def set_geo_targeting(
             reason=reason_text,
             command="geo set",
             campaign_id=campaign_id,
+            campaign_name=campaign.get("name"),
             metadata={"previous_countries": current, "new_countries": country_list},
             result={"campaign": result},
         )

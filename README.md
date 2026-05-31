@@ -54,7 +54,7 @@ Nothing touches your account without going through a reviewable JSON plan first.
 | Budget pacing | Flag capped winners, cut inefficient campaigns |
 | Campaign tools | Create, clone, update, pause, enable, audit |
 | Keyword tools | Add, route, promote, bid-update, manage negatives |
-| Multi-app | Manage multiple apps, switch with `--app <slug>` |
+| Multi-app | Manage multiple apps with `--app <slug>`; campaign IDs are scoped by app `adamId` |
 
 ---
 

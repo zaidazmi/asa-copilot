@@ -11,6 +11,7 @@ from rich.table import Table
 from ..api import SearchAdsClient
 from ..config import load_credentials
 from ..decisions import log_manual_decision
+from .scope import require_campaign_in_current_app
 
 app = typer.Typer(help="Ad group management commands")
 console = Console()
@@ -43,10 +44,7 @@ def list_adgroups(
     client = SearchAdsClient(credentials)
 
     # Verify campaign exists
-    campaign = client.get_campaign(campaign_id)
-    if not campaign:
-        console.print(f"[red]Campaign {campaign_id} not found.[/red]")
-        raise typer.Exit(1)
+    campaign = require_campaign_in_current_app(client, campaign_id)
 
     with console.status("[bold blue]Fetching ad groups..."):
         ad_groups = client.get_ad_groups(campaign_id)
@@ -108,10 +106,7 @@ def create_adgroup(
     client = SearchAdsClient(credentials)
 
     # Verify campaign exists
-    campaign = client.get_campaign(campaign_id)
-    if not campaign:
-        console.print(f"[red]Campaign {campaign_id} not found.[/red]")
-        raise typer.Exit(1)
+    campaign = require_campaign_in_current_app(client, campaign_id)
 
     status_upper = status.upper()
     if status_upper not in ("ENABLED", "PAUSED"):
@@ -186,6 +181,7 @@ def update_adgroup(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    campaign = require_campaign_in_current_app(client, campaign_id)
     reason_text = _require_reason(reason, "updating ad group")
 
     # Build updates
@@ -231,6 +227,7 @@ def update_adgroup(
             reason=reason_text,
             command="adgroups update",
             campaign_id=campaign_id,
+            campaign_name=campaign.get("name"),
             ad_group_id=adgroup_id,
             ad_group_name=result.get("name"),
             metadata={"updates": updates, "changes": changes},
@@ -254,6 +251,7 @@ def pause_adgroup(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    campaign = require_campaign_in_current_app(client, campaign_id)
     reason_text = _require_reason(reason, "pausing ad group")
 
     with console.status("[bold blue]Pausing ad group..."):
@@ -266,6 +264,7 @@ def pause_adgroup(
             reason=reason_text,
             command="adgroups pause",
             campaign_id=campaign_id,
+            campaign_name=campaign.get("name"),
             ad_group_id=adgroup_id,
             ad_group_name=result.get("name"),
             result={"ad_group": result},
@@ -288,6 +287,7 @@ def enable_adgroup(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    campaign = require_campaign_in_current_app(client, campaign_id)
     reason_text = _require_reason(reason, "enabling ad group")
 
     with console.status("[bold blue]Enabling ad group..."):
@@ -300,6 +300,7 @@ def enable_adgroup(
             reason=reason_text,
             command="adgroups enable",
             campaign_id=campaign_id,
+            campaign_name=campaign.get("name"),
             ad_group_id=adgroup_id,
             ad_group_name=result.get("name"),
             result={"ad_group": result},
@@ -323,6 +324,7 @@ def delete_adgroup(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    campaign = require_campaign_in_current_app(client, campaign_id)
 
     # Get ad group info for confirmation
     ad_groups = client.get_ad_groups(campaign_id)
@@ -353,6 +355,7 @@ def delete_adgroup(
                 reason=reason_text,
                 command="adgroups delete",
                 campaign_id=campaign_id,
+                campaign_name=campaign.get("name"),
                 ad_group_id=adgroup_id,
                 ad_group_name=ad_group.get("name"),
                 result={"success": True},

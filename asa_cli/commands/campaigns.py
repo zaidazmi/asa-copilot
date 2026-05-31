@@ -22,6 +22,7 @@ from ..config import (
     parse_campaign_name,
 )
 from ..decisions import log_manual_decision
+from .scope import require_campaign_in_current_app
 
 app = typer.Typer(help="Campaign management commands")
 console = Console()
@@ -467,6 +468,7 @@ def pause_campaign(
                 console.print(f"[red]Failed to pause: {campaign.get('name')}[/red]")
 
     elif campaign_id:
+        campaign = require_campaign_in_current_app(client, campaign_id)
         reason_text = _require_reason(reason, "pausing campaign")
         if client.pause_campaign(campaign_id):
             console.print(f"[green]Campaign {campaign_id} paused.[/green]")
@@ -476,6 +478,7 @@ def pause_campaign(
                 command="campaigns pause",
                 app_name=app_name,
                 campaign_id=campaign_id,
+                campaign_name=campaign.get("name"),
                 result={"success": True},
             )
         else:
@@ -529,6 +532,7 @@ def enable_campaign(
                 console.print(f"[red]Failed to enable: {campaign.get('name')}[/red]")
 
     elif campaign_id:
+        campaign = require_campaign_in_current_app(client, campaign_id)
         reason_text = _require_reason(reason, "enabling campaign")
         if client.enable_campaign(campaign_id):
             console.print(f"[green]Campaign {campaign_id} enabled.[/green]")
@@ -538,6 +542,7 @@ def enable_campaign(
                 command="campaigns enable",
                 app_name=app_name,
                 campaign_id=campaign_id,
+                campaign_name=campaign.get("name"),
                 result={"success": True},
             )
         else:
@@ -652,10 +657,7 @@ def update_campaign(
     app_name = _resolve_app_name()
 
     # Verify campaign exists
-    campaign = client.get_campaign(campaign_id)
-    if not campaign:
-        console.print(f"[red]Campaign {campaign_id} not found.[/red]")
-        raise typer.Exit(1)
+    campaign = require_campaign_in_current_app(client, campaign_id)
 
     reason_text = _require_reason(reason, "updating campaign")
 
@@ -762,6 +764,7 @@ def clone_campaign(
 
     client = SearchAdsClient(credentials)
     app_name = _resolve_app_name()
+    require_campaign_in_current_app(client, source_campaign_id)
     reason_text = _require_reason(reason, "cloning campaign")
     console.print(f"[cyan]Cloning campaign {source_campaign_id}...[/cyan]")
     with console.status("[bold blue]Reading source + creating clone..."):
@@ -878,10 +881,7 @@ def delete_campaign(
 
     elif campaign_id:
         # Get campaign info for confirmation
-        campaign = client.get_campaign(campaign_id)
-        if not campaign:
-            console.print(f"[red]Campaign {campaign_id} not found.[/red]")
-            raise typer.Exit(1)
+        campaign = require_campaign_in_current_app(client, campaign_id)
 
         reason_text = _require_reason(reason, "deleting campaign")
 

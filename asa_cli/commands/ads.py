@@ -11,6 +11,7 @@ from rich.table import Table
 from ..api import SearchAdsClient
 from ..config import get_current_app_config, load_credentials
 from ..decisions import log_manual_decision
+from .scope import require_campaign_in_current_app
 
 app = typer.Typer(help="Ad variation and creative management commands")
 console = Console()
@@ -44,9 +45,12 @@ def list_ads(
     client = SearchAdsClient(credentials)
 
     if campaign_id and ad_group_id:
+        require_campaign_in_current_app(client, campaign_id)
         with console.status("[bold blue]Fetching ads..."):
             ads = client.get_ads(campaign_id, ad_group_id)
     else:
+        if campaign_id:
+            require_campaign_in_current_app(client, campaign_id)
         with console.status("[bold blue]Finding ads..."):
             ads = client.find_ads(campaign_id=campaign_id)
 
@@ -100,6 +104,7 @@ def create_ad(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    campaign = require_campaign_in_current_app(client, campaign_id)
     reason_text = _require_reason(reason, "creating ad")
 
     console.print(f"\nCreating ad:")
@@ -127,6 +132,7 @@ def create_ad(
             reason=reason_text,
             command="ads create",
             campaign_id=campaign_id,
+            campaign_name=campaign.get("name"),
             ad_group_id=ad_group_id,
             metadata={"creative_id": creative_id, "status": status_upper},
             result={"ad": ad},
@@ -151,6 +157,7 @@ def delete_ad(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    campaign = require_campaign_in_current_app(client, campaign_id)
 
     # Get ad info for confirmation
     ad = client.get_ad(campaign_id, ad_group_id, ad_id)
@@ -176,7 +183,7 @@ def delete_ad(
                 reason=reason_text,
                 command="ads delete",
                 campaign_id=campaign_id,
-                campaign_name=ad.get("campaignName"),
+                campaign_name=ad.get("campaignName") or campaign.get("name"),
                 ad_group_id=ad_group_id,
                 ad_group_name=ad.get("adGroupName"),
                 metadata={"ad_id": ad_id, "ad_name": ad.get("name")},
