@@ -25,6 +25,7 @@ from ..config import (
 from ..plans import ChangePlan, save_plan
 from ..operator_reports import build_operator_report
 from ..recommendations import build_keyword_recommendations, keyword_report_row_to_metrics
+from .scope import require_campaign_in_current_app
 
 app = typer.Typer(help="Reporting and analytics commands")
 console = Console()
@@ -431,6 +432,8 @@ def report_keywords(
             console.print("[red]Invalid selection.[/red]")
             return
         campaign_id = campaigns[int(choice) - 1].get("id")
+    else:
+        require_campaign_in_current_app(client, campaign_id)
 
     with console.status("[bold blue]Fetching keyword report..."):
         report_data = client.get_keyword_report(campaign_id, start, end)
@@ -546,12 +549,7 @@ def report_adgroups(
         campaigns = _filter_by_app(client.get_campaigns())
         campaigns_to_report = campaigns
     elif campaign_id:
-        campaign = client.get_campaign(campaign_id)
-        if campaign:
-            campaigns_to_report = [campaign]
-        else:
-            console.print(f"[red]Campaign {campaign_id} not found.[/red]")
-            raise typer.Exit(1)
+        campaigns_to_report = [require_campaign_in_current_app(client, campaign_id)]
     else:
         # Interactive selection
         campaigns = _filter_by_app(client.get_campaigns())
@@ -730,12 +728,7 @@ def report_impression_share(
         campaigns = _filter_by_app(client.get_campaigns())
         campaigns_to_report = campaigns
     elif campaign_id:
-        campaign = client.get_campaign(campaign_id)
-        if campaign:
-            campaigns_to_report = [campaign]
-        else:
-            console.print(f"[red]Campaign {campaign_id} not found.[/red]")
-            raise typer.Exit(1)
+        campaigns_to_report = [require_campaign_in_current_app(client, campaign_id)]
     else:
         # Interactive selection
         campaigns = _filter_by_app(client.get_campaigns())
@@ -1006,6 +999,8 @@ def report_search_terms(
                 console.print("[red]Invalid selection.[/red]")
                 return
             campaign_id = campaigns[int(choice) - 1].get("id")
+    else:
+        require_campaign_in_current_app(client, campaign_id)
 
     with console.status("[bold blue]Fetching search terms report..."):
         report_data = client.get_search_terms_report(campaign_id, start, end)
@@ -1322,12 +1317,7 @@ def report_ads(
         campaigns = _filter_by_app(client.get_campaigns())
         campaigns_to_report = campaigns
     elif campaign_id:
-        campaign = client.get_campaign(campaign_id)
-        if campaign:
-            campaigns_to_report = [campaign]
-        else:
-            console.print(f"[red]Campaign {campaign_id} not found.[/red]")
-            raise typer.Exit(1)
+        campaigns_to_report = [require_campaign_in_current_app(client, campaign_id)]
     else:
         # Interactive selection
         campaigns = _filter_by_app(client.get_campaigns())
@@ -1475,12 +1465,7 @@ def report_bid_recommendations(
         campaigns = _filter_by_app(client.get_campaigns())
         campaigns_to_report = campaigns
     elif campaign_id:
-        campaign = client.get_campaign(campaign_id)
-        if campaign:
-            campaigns_to_report = [campaign]
-        else:
-            console.print(f"[red]Campaign {campaign_id} not found.[/red]")
-            raise typer.Exit(1)
+        campaigns_to_report = [require_campaign_in_current_app(client, campaign_id)]
     else:
         # Interactive selection
         campaigns = _filter_by_app(client.get_campaigns())
