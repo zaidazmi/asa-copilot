@@ -175,15 +175,27 @@ def build_guide_hygiene_actions(
 
     keyword_records = collect_keyword_inventory(client, campaigns, app_name=app_name)
 
-    by_keyword: dict[tuple[str, str, tuple[str, ...]], list[dict]] = defaultdict(list)
+    by_keyword: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for record in keyword_records:
-        by_keyword[(record["keyword"], record["match_type"], record["countries"])].append(record)
+        by_keyword[(record["keyword"], record["match_type"])].append(record)
 
-    for (term, match_type, countries), records in by_keyword.items():
+    for (term, match_type), records in by_keyword.items():
         if len(records) <= 1:
             continue
-        country_text = ", ".join(countries) if countries else "unknown countries"
-        for duplicate in records[1:]:
+        kept_records: list[dict] = []
+        for record in records:
+            overlapping = [
+                kept
+                for kept in kept_records
+                if _countries_overlap(kept["countries"], record["countries"])
+            ]
+            if not overlapping:
+                kept_records.append(record)
+                continue
+
+            duplicate = record
+            countries = duplicate["countries"]
+            country_text = ", ".join(countries) if countries else "unknown countries"
             if duplicate.get("keyword_id") is None:
                 actions.append(
                     PlanAction(

@@ -8,8 +8,21 @@ from asa_cli.main import app
 def test_live_mutation_commands_expose_reason_option():
     runner = CliRunner()
     commands = [
+        ["adgroups", "create"],
+        ["adgroups", "update"],
+        ["adgroups", "pause"],
+        ["adgroups", "enable"],
+        ["adgroups", "delete"],
         ["ads", "create"],
         ["ads", "delete"],
+        ["budget", "create"],
+        ["campaigns", "setup"],
+        ["campaigns", "pause"],
+        ["campaigns", "enable"],
+        ["campaigns", "create"],
+        ["campaigns", "update"],
+        ["campaigns", "clone"],
+        ["campaigns", "delete"],
         ["geo", "set"],
         ["keywords", "add"],
         ["keywords", "add-negatives"],

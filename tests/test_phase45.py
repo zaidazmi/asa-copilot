@@ -98,6 +98,43 @@ def test_guide_hygiene_scopes_duplicates_and_negatives_by_country():
     assert negatives_by_campaign[2] == ["au term", "shared term"]
 
 
+def test_guide_hygiene_flags_duplicates_when_country_scopes_overlap():
+    client = MagicMock()
+    campaigns = [
+        {"id": 1, "name": "Noteo - Category - US+AU", "countriesOrRegions": ["US", "AU"]},
+        {"id": 2, "name": "Noteo - Category - US", "countriesOrRegions": ["US"]},
+        {"id": 3, "name": "Noteo - Category - NZ", "countriesOrRegions": ["NZ"]},
+    ]
+
+    client.get_ad_groups.side_effect = lambda campaign_id: {
+        1: [{"id": 10, "name": "Category-Multi", "automatedKeywordsOptIn": False}],
+        2: [{"id": 20, "name": "Category-US", "automatedKeywordsOptIn": False}],
+        3: [{"id": 30, "name": "Category-NZ", "automatedKeywordsOptIn": False}],
+    }[campaign_id]
+    client.get_keywords.side_effect = lambda campaign_id, ad_group_id: {
+        (1, 10): [
+            {"id": 100, "text": "shared term", "matchType": "EXACT", "status": "ACTIVE"},
+        ],
+        (2, 20): [
+            {"id": 200, "text": "shared term", "matchType": "EXACT", "status": "ACTIVE"},
+        ],
+        (3, 30): [
+            {"id": 300, "text": "shared term", "matchType": "EXACT", "status": "ACTIVE"},
+        ],
+    }[(campaign_id, ad_group_id)]
+    client.get_negative_keywords.return_value = []
+
+    rules = load_rules(app_config=AppConfig(app_id=123, app_name="Noteo"))
+
+    actions = build_guide_hygiene_actions(client, campaigns, app_name=None, rules=rules)
+
+    pause_actions = [action for action in actions if action.type == PlanActionType.PAUSE_KEYWORD]
+
+    assert len(pause_actions) == 1
+    assert pause_actions[0].campaign_id == 2
+    assert pause_actions[0].metadata["countries"] == ["US"]
+
+
 def test_guide_hygiene_flags_search_match_when_rules_disable_it():
     client = MagicMock()
     campaigns = [
