@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from .config import CONFIG_DIR, ensure_config_dir
+from .config import CONFIG_DIR, get_current_app_config, ensure_config_dir
 
 DECISION_LOG_FILE = CONFIG_DIR / "decision-log.jsonl"
 
@@ -24,6 +24,7 @@ class DecisionRecord(BaseModel):
     reason: str
     source: str = "manual"
     actor: str = "cli"
+    app_id: Optional[int] = None
     app_name: Optional[str] = None
     command: Optional[str] = None
     note: Optional[str] = None
@@ -83,6 +84,7 @@ def log_manual_decision(
     source: str = "manual",
     actor: str = "cli",
     command: Optional[str] = None,
+    app_id: Optional[int] = None,
     app_name: Optional[str] = None,
     note: Optional[str] = None,
     campaign_id: Optional[int] = None,
@@ -98,13 +100,15 @@ def log_manual_decision(
     result: Optional[dict[str, Any]] = None,
 ) -> DecisionRecord:
     """Create and append a manual/direct command decision."""
+    app_config = get_current_app_config()
     record = DecisionRecord(
         event_type=event_type,
         reason=reason,
         source=source,
         actor=actor,
         command=command,
-        app_name=app_name,
+        app_id=app_id if app_id is not None else (app_config.app_id if app_config else None),
+        app_name=app_name or (app_config.app_name if app_config else None),
         note=note,
         campaign_id=campaign_id,
         campaign_name=campaign_name,
@@ -141,6 +145,7 @@ def log_applied_plan_decisions(
             reason=action.reason or "Legacy plan action without reason",
             source=action.source or plan.source,
             actor=actor,
+            app_id=getattr(plan, "app_id", None),
             app_name=plan.app_name,
             note=approval_note,
             plan_id=plan.id,
@@ -179,6 +184,11 @@ def decisions_to_markdown(records: list[DecisionRecord]) -> str:
                 f"- Reason: {record.reason}",
             ]
         )
+        if record.app_id or record.app_name:
+            app_label = record.app_name or ""
+            if record.app_id:
+                app_label = f"{app_label} ({record.app_id})".strip()
+            lines.append(f"- App: {app_label}")
         if target:
             lines.append(f"- Target: {target}")
         if record.plan_id:
