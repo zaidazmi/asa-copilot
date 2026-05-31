@@ -1,5 +1,6 @@
 """Keyword management commands."""
 
+import sys
 from typing import Optional
 
 import typer
@@ -19,9 +20,24 @@ from ..config import (
     load_credentials,
     parse_campaign_name,
 )
+from ..decisions import log_manual_decision
 
 app = typer.Typer(help="Keyword management commands")
 console = Console()
+
+
+def _require_reason(reason: Optional[str], action: str) -> str:
+    """Require a reason for spend-affecting keyword commands."""
+    if reason and reason.strip():
+        return reason.strip()
+    if not sys.stdin.isatty():
+        console.print(f"[red]A --reason is required for {action}.[/red]")
+        raise typer.Exit(1)
+    while True:
+        reason_text = Prompt.ask(f"Reason for {action}").strip()
+        if reason_text:
+            return reason_text
+        console.print("[red]A reason is required.[/red]")
 
 
 def _resolve_app_name() -> Optional[str]:
@@ -115,9 +131,15 @@ def list_keywords(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     ad_group_id: Optional[int] = typer.Option(None, "--ad-group", "-g", help="Ad group ID"),
     show_negatives: bool = typer.Option(False, "--negatives", "-n", help="Show negative keywords"),
-    filter_text: Optional[str] = typer.Option(None, "--filter", "-f", help="Filter keywords containing text"),
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="Filter by status (ACTIVE, PAUSED)"),
-    match_type: Optional[str] = typer.Option(None, "--match-type", "-m", help="Filter by match type (EXACT, BROAD)"),
+    filter_text: Optional[str] = typer.Option(
+        None, "--filter", "-f", help="Filter keywords containing text"
+    ),
+    status: Optional[str] = typer.Option(
+        None, "--status", "-s", help="Filter by status (ACTIVE, PAUSED)"
+    ),
+    match_type: Optional[str] = typer.Option(
+        None, "--match-type", "-m", help="Filter by match type (EXACT, BROAD)"
+    ),
 ):
     """List keywords in a campaign or ad group."""
     credentials = load_credentials()
@@ -141,11 +163,15 @@ def list_keywords(
 
         # Apply filters
         if filter_text:
-            negatives = [kw for kw in negatives if filter_text.lower() in kw.get("text", "").lower()]
+            negatives = [
+                kw for kw in negatives if filter_text.lower() in kw.get("text", "").lower()
+            ]
         if status:
             negatives = [kw for kw in negatives if kw.get("status", "").upper() == status.upper()]
         if match_type:
-            negatives = [kw for kw in negatives if kw.get("matchType", "").upper() == match_type.upper()]
+            negatives = [
+                kw for kw in negatives if kw.get("matchType", "").upper() == match_type.upper()
+            ]
 
         if not negatives:
             console.print("[yellow]No negative keywords found matching filters.[/yellow]")
@@ -189,7 +215,9 @@ def list_keywords(
         if status:
             keywords = [kw for kw in keywords if kw.get("status", "").upper() == status.upper()]
         if match_type:
-            keywords = [kw for kw in keywords if kw.get("matchType", "").upper() == match_type.upper()]
+            keywords = [
+                kw for kw in keywords if kw.get("matchType", "").upper() == match_type.upper()
+            ]
 
         if not keywords:
             if not filter_text and not status and not match_type:
@@ -234,6 +262,7 @@ def add_keywords(
     bid: Optional[float] = typer.Option(None, "--bid", "-b", help="Bid amount (USD)"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without adding"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for adding keywords"),
 ):
     """Add keywords to a campaign with automatic routing.
 
@@ -243,7 +272,9 @@ def add_keywords(
     - Discovery campaign negative keywords (to prevent overlap)
     """
     if campaign_type == CampaignType.DISCOVERY:
-        console.print("[red]Cannot add keywords directly to Discovery. Use brand/category/competitor.[/red]")
+        console.print(
+            "[red]Cannot add keywords directly to Discovery. Use brand/category/competitor.[/red]"
+        )
         raise typer.Exit(1)
 
     credentials = load_credentials()
@@ -278,7 +309,9 @@ def add_keywords(
 
     if not target_campaign:
         console.print(f"[red]No {campaign_type.value} campaign found.[/red]")
-        console.print(f"[yellow]Tip: Make sure your campaign name contains '{campaign_type.value}'[/yellow]")
+        console.print(
+            f"[yellow]Tip: Make sure your campaign name contains '{campaign_type.value}'[/yellow]"
+        )
         raise typer.Exit(1)
 
     # Show what will be added
@@ -299,6 +332,8 @@ def add_keywords(
     if dry_run:
         console.print("\n[yellow]Dry run - no changes made.[/yellow]")
         return
+
+    reason_text = _require_reason(reason, "adding keywords")
 
     if not force and not Confirm.ask("\nProceed?"):
         console.print("[yellow]Cancelled.[/yellow]")
@@ -328,7 +363,25 @@ def add_keywords(
         )
 
     if added:
-        console.print(f"[green]Added {len(added)} keywords to {campaign_type.value} campaign[/green]")
+        console.print(
+            f"[green]Added {len(added)} keywords to {campaign_type.value} campaign[/green]"
+        )
+        log_manual_decision(
+            event_type="keywords_added",
+            reason=reason_text,
+            command="keywords add",
+            campaign_id=target_id,
+            campaign_name=target_campaign.get("name"),
+            ad_group_id=exact_ad_group.get("id"),
+            ad_group_name=exact_ad_group.get("name"),
+            keywords=keyword_list,
+            metadata={
+                "match_type": MatchType.EXACT.value,
+                "bid": bid,
+                "campaign_type": campaign_type.value,
+            },
+            result={"added": added},
+        )
     elif errors:
         all_duplicates = all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors)
         if all_duplicates:
@@ -361,7 +414,25 @@ def add_keywords(
 
             if broad_added:
                 console.print("[green]Added keywords to Discovery (broad match)[/green]")
-            elif broad_errors and all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in broad_errors):
+                log_manual_decision(
+                    event_type="keywords_added",
+                    reason=reason_text,
+                    command="keywords add",
+                    campaign_id=discovery_id,
+                    campaign_name=discovery_campaign.get("name"),
+                    ad_group_id=broad_ad_group.get("id"),
+                    ad_group_name=broad_ad_group.get("name"),
+                    keywords=keyword_list,
+                    metadata={
+                        "match_type": MatchType.BROAD.value,
+                        "bid": bid,
+                        "campaign_type": CampaignType.DISCOVERY.value,
+                    },
+                    result={"added": broad_added},
+                )
+            elif broad_errors and all(
+                e.get("messageCode") == "DUPLICATE_KEYWORD" for e in broad_errors
+            ):
                 console.print("[dim]Keywords already exist in Discovery (broad match)[/dim]")
 
         # Add as negatives to discovery
@@ -374,6 +445,16 @@ def add_keywords(
 
         if added:
             console.print("[green]Added negative keywords to Discovery[/green]")
+            log_manual_decision(
+                event_type="negative_keywords_added",
+                reason=reason_text,
+                command="keywords add",
+                campaign_id=discovery_id,
+                campaign_name=discovery_campaign.get("name"),
+                keywords=keyword_list,
+                metadata={"match_type": MatchType.EXACT.value, "paired_with": "keyword_add"},
+                result={"added": added},
+            )
         elif errors and all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors):
             console.print("[dim]Negative keywords already exist in Discovery[/dim]")
 
@@ -383,12 +464,15 @@ def add_keywords(
 @app.command("add-negatives")
 def add_negatives(
     keywords: str = typer.Argument(..., help="Comma-separated keywords to block"),
-    all_campaigns: bool = typer.Option(
-        False, "--all", "-a", help="Add to all managed campaigns"
+    all_campaigns: bool = typer.Option(False, "--all", "-a", help="Add to all managed campaigns"),
+    campaign_id: Optional[int] = typer.Option(
+        None, "--campaign", "-c", help="Specific campaign ID"
     ),
-    campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Specific campaign ID"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without adding"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    reason: Optional[str] = typer.Option(
+        None, "--reason", help="Reason for adding negative keywords"
+    ),
 ):
     """Add negative keywords to block unwanted search terms."""
     credentials = load_credentials()
@@ -415,7 +499,9 @@ def add_negatives(
     elif all_campaigns:
         campaigns = client.get_campaigns()
         # Include campaigns with recognized types
-        target_campaigns = [c for c in campaigns if detect_campaign_type(c.get("name", ""), app_name=app_name)]
+        target_campaigns = [
+            c for c in campaigns if detect_campaign_type(c.get("name", ""), app_name=app_name)
+        ]
     else:
         campaign = select_campaign(client)
         if campaign:
@@ -436,6 +522,8 @@ def add_negatives(
         console.print("\n[yellow]Dry run - no changes made.[/yellow]")
         return
 
+    reason_text = _require_reason(reason, "adding negative keywords")
+
     if not force and not Confirm.ask("\nProceed?"):
         console.print("[yellow]Cancelled.[/yellow]")
         return
@@ -451,6 +539,16 @@ def add_negatives(
         if added:
             console.print(f"[green]Added {len(added)} negatives to {cname}[/green]")
             success_count += 1
+            log_manual_decision(
+                event_type="negative_keywords_added",
+                reason=reason_text,
+                command="keywords add-negatives",
+                campaign_id=cid,
+                campaign_name=cname,
+                keywords=keyword_list,
+                metadata={"match_type": MatchType.EXACT.value},
+                result={"added": added},
+            )
         elif errors:
             all_duplicates = all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors)
             if all_duplicates:
@@ -479,6 +577,7 @@ def promote_keywords(
     bid: Optional[float] = typer.Option(None, "--bid", "-b", help="Bid amount (USD)"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without changes"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for promoting keywords"),
 ):
     """Promote keywords from Discovery to exact match campaigns.
 
@@ -520,7 +619,9 @@ def promote_keywords(
 
     if not target_campaign:
         console.print(f"[red]No {target_type.value} campaign found.[/red]")
-        console.print(f"[yellow]Tip: Make sure your campaign name contains '{target_type.value}'[/yellow]")
+        console.print(
+            f"[yellow]Tip: Make sure your campaign name contains '{target_type.value}'[/yellow]"
+        )
         raise typer.Exit(1)
 
     if not discovery_campaign:
@@ -539,6 +640,8 @@ def promote_keywords(
     if dry_run:
         console.print("\n[yellow]Dry run - no changes made.[/yellow]")
         return
+
+    reason_text = _require_reason(reason, "promoting keywords")
 
     if not force and not Confirm.ask("\nProceed?"):
         console.print("[yellow]Cancelled.[/yellow]")
@@ -563,7 +666,21 @@ def promote_keywords(
             )
 
         if added:
-            console.print(f"[green]Added {len(added)} keywords to {target_type.value} campaign[/green]")
+            console.print(
+                f"[green]Added {len(added)} keywords to {target_type.value} campaign[/green]"
+            )
+            log_manual_decision(
+                event_type="keywords_promoted",
+                reason=reason_text,
+                command="keywords promote",
+                campaign_id=target_id,
+                campaign_name=target_campaign.get("name"),
+                ad_group_id=exact_ad_group.get("id"),
+                ad_group_name=exact_ad_group.get("name"),
+                keywords=keyword_list,
+                metadata={"target_type": target_type.value, "bid": bid},
+                result={"added": added},
+            )
         elif errors:
             all_duplicates = all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors)
             if all_duplicates:
@@ -582,6 +699,16 @@ def promote_keywords(
 
         if added:
             console.print("[green]Added negatives to Discovery[/green]")
+            log_manual_decision(
+                event_type="negative_keywords_added",
+                reason=reason_text,
+                command="keywords promote",
+                campaign_id=discovery_id,
+                campaign_name=discovery_campaign.get("name"),
+                keywords=keyword_list,
+                metadata={"paired_with": "promotion"},
+                result={"added": added},
+            )
         elif errors and all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors):
             console.print("[dim]Negatives already exist in Discovery[/dim]")
 
@@ -592,8 +719,11 @@ def promote_keywords(
 def delete_keywords_cmd(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     ad_group_id: Optional[int] = typer.Option(None, "--ad-group", "-g", help="Ad group ID"),
-    keyword_ids: Optional[str] = typer.Option(None, "--ids", help="Comma-separated keyword IDs to delete"),
+    keyword_ids: Optional[str] = typer.Option(
+        None, "--ids", help="Comma-separated keyword IDs to delete"
+    ),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for deleting keywords"),
 ):
     """Delete keywords from a campaign."""
     credentials = load_credentials()
@@ -657,6 +787,8 @@ def delete_keywords_cmd(
         console.print("[yellow]No keywords selected.[/yellow]")
         return
 
+    reason_text = _require_reason(reason, "deleting keywords")
+
     console.print(f"\n[bold red]Keywords to delete ({len(keywords_to_delete)}):[/bold red]")
     for kw in keywords_to_delete:
         console.print(f"  - {kw.get('text')} ({kw.get('matchType')})")
@@ -669,6 +801,17 @@ def delete_keywords_cmd(
     with console.status("[bold blue]Deleting keywords..."):
         if client.delete_keywords(campaign_id, ad_group_id, ids_to_delete):
             console.print(f"[green]Deleted {len(ids_to_delete)} keywords.[/green]")
+            log_manual_decision(
+                event_type="keywords_deleted",
+                reason=reason_text,
+                command="keywords delete",
+                campaign_id=campaign_id,
+                ad_group_id=ad_group_id,
+                keyword_id=ids_to_delete[0] if len(ids_to_delete) == 1 else None,
+                keywords=[kw.get("text", "") for kw in keywords_to_delete],
+                metadata={"keyword_ids": ids_to_delete},
+                result={"success": True},
+            )
         else:
             console.print("[red]Failed to delete some keywords.[/red]")
 
@@ -679,6 +822,9 @@ def update_bid(
     ad_group_id: Optional[int] = typer.Option(None, "--ad-group", "-g", help="Ad group ID"),
     keyword_id: Optional[int] = typer.Option(None, "--keyword", "-k", help="Keyword ID"),
     bid: float = typer.Option(..., "--bid", "-b", help="New bid amount (USD)"),
+    reason: Optional[str] = typer.Option(
+        None, "--reason", help="Reason for updating the keyword bid"
+    ),
 ):
     """Update bid amount for a keyword."""
     credentials = load_credentials()
@@ -731,11 +877,23 @@ def update_bid(
                 break
             console.print("[red]Invalid selection.[/red]")
 
+    reason_text = _require_reason(reason, "updating keyword bid")
+
     with console.status(f"[bold blue]Updating bid to ${bid}..."):
         result = client.update_keyword_bid(campaign_id, ad_group_id, keyword_id, bid)
 
     if result:
         console.print(f"[green]Updated keyword {keyword_id} bid to ${bid}.[/green]")
+        log_manual_decision(
+            event_type="keyword_bid_updated",
+            reason=reason_text,
+            command="keywords update-bid",
+            campaign_id=campaign_id,
+            ad_group_id=ad_group_id,
+            keyword_id=keyword_id,
+            metadata={"bid": bid},
+            result={"keyword": result},
+        )
     else:
         console.print(f"[red]Failed to update bid for keyword {keyword_id}.[/red]")
 
@@ -745,7 +903,10 @@ def pause_keyword_cmd(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     ad_group_id: Optional[int] = typer.Option(None, "--ad-group", "-g", help="Ad group ID"),
     keyword_id: Optional[int] = typer.Option(None, "--keyword", "-k", help="Keyword ID"),
-    all_active: bool = typer.Option(False, "--all", "-a", help="Pause all active keywords in the ad group"),
+    all_active: bool = typer.Option(
+        False, "--all", "-a", help="Pause all active keywords in the ad group"
+    ),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for pausing keyword(s)"),
 ):
     """Pause a keyword or all active keywords."""
     credentials = load_credentials()
@@ -784,6 +945,7 @@ def pause_keyword_cmd(
 
     # Pause all active keywords if --all flag
     if all_active:
+        reason_text = _require_reason(reason, "pausing keywords")
         console.print(f"[bold]Pausing {len(active_keywords)} active keywords...[/bold]")
         success_count = 0
         for kw in active_keywords:
@@ -791,9 +953,21 @@ def pause_keyword_cmd(
             if client.pause_keyword(campaign_id, ad_group_id, kw_id):
                 console.print(f"  [green]paused[/green] {kw.get('text')}")
                 success_count += 1
+                log_manual_decision(
+                    event_type="keyword_paused",
+                    reason=reason_text,
+                    command="keywords pause --all",
+                    campaign_id=campaign_id,
+                    ad_group_id=ad_group_id,
+                    keyword_id=kw_id,
+                    keywords=[kw.get("text", "")],
+                    result={"success": True},
+                )
             else:
                 console.print(f"  [red]failed[/red] {kw.get('text')}")
-        console.print(f"\n[bold green]Paused {success_count}/{len(active_keywords)} keywords.[/bold green]")
+        console.print(
+            f"\n[bold green]Paused {success_count}/{len(active_keywords)} keywords.[/bold green]"
+        )
         return
 
     # Select keyword if not provided
@@ -817,9 +991,22 @@ def pause_keyword_cmd(
                 break
             console.print("[red]Invalid selection.[/red]")
 
+    reason_text = _require_reason(reason, "pausing keyword")
+
     with console.status("[bold blue]Pausing keyword..."):
         if client.pause_keyword(campaign_id, ad_group_id, keyword_id):
             console.print(f"[green]Keyword {keyword_id} paused.[/green]")
+            selected = next((kw for kw in active_keywords if kw.get("id") == keyword_id), {})
+            log_manual_decision(
+                event_type="keyword_paused",
+                reason=reason_text,
+                command="keywords pause",
+                campaign_id=campaign_id,
+                ad_group_id=ad_group_id,
+                keyword_id=keyword_id,
+                keywords=[selected.get("text", "")] if selected else [],
+                result={"success": True},
+            )
         else:
             console.print(f"[red]Failed to pause keyword {keyword_id}.[/red]")
 
@@ -829,7 +1016,10 @@ def enable_keyword_cmd(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     ad_group_id: Optional[int] = typer.Option(None, "--ad-group", "-g", help="Ad group ID"),
     keyword_id: Optional[int] = typer.Option(None, "--keyword", "-k", help="Keyword ID"),
-    all_paused: bool = typer.Option(False, "--all", "-a", help="Enable all paused keywords in the ad group"),
+    all_paused: bool = typer.Option(
+        False, "--all", "-a", help="Enable all paused keywords in the ad group"
+    ),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for enabling keyword(s)"),
 ):
     """Enable a paused keyword or all paused keywords."""
     credentials = load_credentials()
@@ -868,6 +1058,7 @@ def enable_keyword_cmd(
 
     # Enable all paused keywords if --all flag
     if all_paused:
+        reason_text = _require_reason(reason, "enabling keywords")
         console.print(f"[bold]Enabling {len(paused_keywords)} paused keywords...[/bold]")
         success_count = 0
         for kw in paused_keywords:
@@ -875,9 +1066,21 @@ def enable_keyword_cmd(
             if client.enable_keyword(campaign_id, ad_group_id, kw_id):
                 console.print(f"  [green]enabled[/green] {kw.get('text')}")
                 success_count += 1
+                log_manual_decision(
+                    event_type="keyword_enabled",
+                    reason=reason_text,
+                    command="keywords enable --all",
+                    campaign_id=campaign_id,
+                    ad_group_id=ad_group_id,
+                    keyword_id=kw_id,
+                    keywords=[kw.get("text", "")],
+                    result={"success": True},
+                )
             else:
                 console.print(f"  [red]failed[/red] {kw.get('text')}")
-        console.print(f"\n[bold green]Enabled {success_count}/{len(paused_keywords)} keywords.[/bold green]")
+        console.print(
+            f"\n[bold green]Enabled {success_count}/{len(paused_keywords)} keywords.[/bold green]"
+        )
         return
 
     # Select keyword if not provided
@@ -901,9 +1104,22 @@ def enable_keyword_cmd(
                 break
             console.print("[red]Invalid selection.[/red]")
 
+    reason_text = _require_reason(reason, "enabling keyword")
+
     with console.status("[bold blue]Enabling keyword..."):
         if client.enable_keyword(campaign_id, ad_group_id, keyword_id):
             console.print(f"[green]Keyword {keyword_id} enabled.[/green]")
+            selected = next((kw for kw in paused_keywords if kw.get("id") == keyword_id), {})
+            log_manual_decision(
+                event_type="keyword_enabled",
+                reason=reason_text,
+                command="keywords enable",
+                campaign_id=campaign_id,
+                ad_group_id=ad_group_id,
+                keyword_id=keyword_id,
+                keywords=[selected.get("text", "")] if selected else [],
+                result={"success": True},
+            )
         else:
             console.print(f"[red]Failed to enable keyword {keyword_id}.[/red]")
 
@@ -911,17 +1127,10 @@ def enable_keyword_cmd(
 @app.command()
 def research(
     seed: Optional[str] = typer.Option(
-        None, "--seed", "-s",
-        help="Comma-separated seed keywords for recommendations"
+        None, "--seed", "-s", help="Comma-separated seed keywords for recommendations"
     ),
-    limit: int = typer.Option(
-        50, "--limit", "-l",
-        help="Max results to show"
-    ),
-    raw: bool = typer.Option(
-        False, "--raw",
-        help="Show raw API response for debugging"
-    ),
+    limit: int = typer.Option(50, "--limit", "-l", help="Max results to show"),
+    raw: bool = typer.Option(False, "--raw", help="Show raw API response for debugging"),
 ):
     """Research keywords — get Apple's recommendations and search popularity scores.
 
@@ -980,6 +1189,7 @@ def research(
 
     if raw:
         import json
+
         console.print(json.dumps(recommendations, indent=2, default=str))
         return
 
@@ -996,7 +1206,9 @@ def research(
     for item in recommendations[:limit]:
         keyword = item.get("keyword") or item.get("text") or item.get("id", "?")
         bid = item.get("bidAmount", {})
-        bid_str = f"${bid.get('amount', '-')}" if isinstance(bid, dict) else str(bid) if bid else "-"
+        bid_str = (
+            f"${bid.get('amount', '-')}" if isinstance(bid, dict) else str(bid) if bid else "-"
+        )
         popularity = item.get("searchPopularity", item.get("popularity", "-"))
         table.add_row(str(keyword), bid_str, str(popularity))
         shown += 1
@@ -1073,7 +1285,9 @@ def list_negatives(
         )
 
     console.print(table)
-    console.print(f"\n[dim]Campaign-level: {len(campaign_negatives)} | Ad-group-level: {len(ag_negatives)} | Total: {len(all_negatives)}[/dim]")
+    console.print(
+        f"\n[dim]Campaign-level: {len(campaign_negatives)} | Ad-group-level: {len(ag_negatives)} | Total: {len(all_negatives)}[/dim]"
+    )
 
 
 @app.command("delete-negatives")
@@ -1081,6 +1295,9 @@ def delete_negatives(
     ids: str = typer.Argument(..., help="Comma-separated negative keyword IDs to delete"),
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    reason: Optional[str] = typer.Option(
+        None, "--reason", help="Reason for deleting negative keywords"
+    ),
 ):
     """Delete negative keywords by comma-separated IDs."""
     credentials = load_credentials()
@@ -1103,6 +1320,8 @@ def delete_negatives(
         console.print("[red]No valid keyword IDs provided.[/red]")
         raise typer.Exit(1)
 
+    reason_text = _require_reason(reason, "deleting negative keywords")
+
     console.print(f"[bold red]Deleting {len(keyword_ids)} negative keyword(s):[/bold red]")
     console.print(f"  IDs: {', '.join(str(i) for i in keyword_ids)}")
 
@@ -1115,6 +1334,14 @@ def delete_negatives(
 
     if success:
         console.print(f"[green]Deleted {len(keyword_ids)} negative keyword(s).[/green]")
+        log_manual_decision(
+            event_type="negative_keywords_deleted",
+            reason=reason_text,
+            command="keywords delete-negatives",
+            campaign_id=campaign_id,
+            metadata={"keyword_ids": keyword_ids},
+            result={"success": True},
+        )
     else:
         console.print("[red]Failed to delete some negative keywords.[/red]")
 
@@ -1184,6 +1411,7 @@ def update_bids_bulk(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     ad_group_id: Optional[int] = typer.Option(None, "--ad-group", "-g", help="Ad group ID"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for updating keyword bids"),
 ):
     """Update all keyword bids in a campaign/ad group at once."""
     credentials = load_credentials()
@@ -1237,6 +1465,8 @@ def update_bids_bulk(
     console.print(table)
     console.print(f"\n[bold]Updating {len(keywords)} keyword(s) to ${bid:.2f}[/bold]")
 
+    reason_text = _require_reason(reason, "updating keyword bids")
+
     if not force and not Confirm.ask("\nProceed?"):
         console.print("[yellow]Cancelled.[/yellow]")
         return
@@ -1251,6 +1481,18 @@ def update_bids_bulk(
         result = client.update_keywords_bulk(campaign_id, ad_group_id, updates)
 
     if result is not None:
-        console.print(f"\n[bold green]Updated {len(keywords)} keyword bids to ${bid:.2f}.[/bold green]")
+        console.print(
+            f"\n[bold green]Updated {len(keywords)} keyword bids to ${bid:.2f}.[/bold green]"
+        )
+        log_manual_decision(
+            event_type="keyword_bids_updated",
+            reason=reason_text,
+            command="keywords update-bids-bulk",
+            campaign_id=campaign_id,
+            ad_group_id=ad_group_id,
+            keywords=[kw.get("text", "") for kw in keywords],
+            metadata={"bid": bid, "keyword_ids": [kw.get("id") for kw in keywords]},
+            result={"updated": result},
+        )
     else:
         console.print("[red]Failed to update keyword bids.[/red]")

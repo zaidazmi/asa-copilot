@@ -1,16 +1,33 @@
 """Geo targeting commands."""
 
+import sys
 from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.prompt import Prompt
 from rich.table import Table
 
 from ..api import SearchAdsClient
 from ..config import load_credentials
+from ..decisions import log_manual_decision
 
 app = typer.Typer(help="Geo targeting commands")
 console = Console()
+
+
+def _require_reason(reason: Optional[str], action: str) -> str:
+    """Require a reason for serving-affecting geo commands."""
+    if reason and reason.strip():
+        return reason.strip()
+    if not sys.stdin.isatty():
+        console.print(f"[red]A --reason is required for {action}.[/red]")
+        raise typer.Exit(1)
+    while True:
+        reason_text = Prompt.ask(f"Reason for {action}").strip()
+        if reason_text:
+            return reason_text
+        console.print("[red]A reason is required.[/red]")
 
 
 @app.command("search")
@@ -74,9 +91,7 @@ def show_geo_targeting():
         console.print("[yellow]No campaigns found.[/yellow]")
         return
 
-    table = Table(
-        title="Campaign Geo Targeting", show_header=True, header_style="bold magenta"
-    )
+    table = Table(title="Campaign Geo Targeting", show_header=True, header_style="bold magenta")
     table.add_column("ID", style="cyan")
     table.add_column("Campaign Name")
     table.add_column("Status")
@@ -85,9 +100,7 @@ def show_geo_targeting():
     for campaign in campaigns:
         countries = ", ".join(campaign.get("countriesOrRegions", []))
         status = campaign.get("displayStatus", campaign.get("status", "UNKNOWN"))
-        status_style = (
-            "green" if status == "RUNNING" else "yellow" if status == "PAUSED" else "red"
-        )
+        status_style = "green" if status == "RUNNING" else "yellow" if status == "PAUSED" else "red"
 
         table.add_row(
             str(campaign.get("id")),
@@ -105,6 +118,9 @@ def set_geo_targeting(
     campaign_id: int = typer.Option(..., "--campaign", "-c", help="Campaign ID"),
     countries: str = typer.Option(
         ..., "--countries", help="Comma-separated country/region codes (e.g. US,CA,GB)"
+    ),
+    reason: Optional[str] = typer.Option(
+        None, "--reason", help="Reason for changing geo targeting"
     ),
 ):
     """Set country targeting for a campaign."""
@@ -126,14 +142,26 @@ def set_geo_targeting(
         current = client.get_campaign_geo_targeting(campaign_id)
 
     console.print(f"\nCampaign [cyan]{campaign_id}[/cyan]")
-    console.print(f"  Current countries: [yellow]{', '.join(current) if current else 'None'}[/yellow]")
+    console.print(
+        f"  Current countries: [yellow]{', '.join(current) if current else 'None'}[/yellow]"
+    )
     console.print(f"  New countries:     [cyan]{', '.join(country_list)}[/cyan]")
+
+    reason_text = _require_reason(reason, "changing geo targeting")
 
     with console.status("[bold blue]Updating geo targeting..."):
         result = client.update_campaign_countries(campaign_id, country_list)
 
     if result:
         console.print(f"\n[green]Geo targeting updated successfully![/green]")
+        log_manual_decision(
+            event_type="campaign_geo_updated",
+            reason=reason_text,
+            command="geo set",
+            campaign_id=campaign_id,
+            metadata={"previous_countries": current, "new_countries": country_list},
+            result={"campaign": result},
+        )
     else:
         console.print("[red]Failed to update geo targeting.[/red]")
         raise typer.Exit(1)

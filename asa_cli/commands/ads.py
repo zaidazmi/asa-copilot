@@ -1,17 +1,33 @@
 """Ad variation and creative management commands."""
 
+import sys
 from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from ..api import SearchAdsClient
 from ..config import get_current_app_config, load_credentials
+from ..decisions import log_manual_decision
 
 app = typer.Typer(help="Ad variation and creative management commands")
 console = Console()
+
+
+def _require_reason(reason: Optional[str], action: str) -> str:
+    """Require a reason for serving-affecting ad commands."""
+    if reason and reason.strip():
+        return reason.strip()
+    if not sys.stdin.isatty():
+        console.print(f"[red]A --reason is required for {action}.[/red]")
+        raise typer.Exit(1)
+    while True:
+        reason_text = Prompt.ask(f"Reason for {action}").strip()
+        if reason_text:
+            return reason_text
+        console.print("[red]A reason is required.[/red]")
 
 
 @app.command("list")
@@ -67,7 +83,10 @@ def create_ad(
     ad_group_id: int = typer.Option(..., "--adgroup", "-g", help="Ad group ID"),
     creative_id: int = typer.Option(..., "--creative", help="Creative ID"),
     name: str = typer.Argument(..., help="Ad name"),
-    status: str = typer.Option("ENABLED", "--status", "-s", help="Initial status (ENABLED or PAUSED)"),
+    status: str = typer.Option(
+        "ENABLED", "--status", "-s", help="Initial status (ENABLED or PAUSED)"
+    ),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for creating the ad"),
 ):
     """Create a new ad in an ad group."""
     credentials = load_credentials()
@@ -81,6 +100,7 @@ def create_ad(
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
+    reason_text = _require_reason(reason, "creating ad")
 
     console.print(f"\nCreating ad:")
     console.print(f"  Name: [cyan]{name}[/cyan]")
@@ -102,6 +122,15 @@ def create_ad(
         console.print(f"\n[green]Ad created successfully![/green]")
         console.print(f"  ID: [cyan]{ad.get('id')}[/cyan]")
         console.print(f"  Name: [cyan]{ad.get('name')}[/cyan]")
+        log_manual_decision(
+            event_type="ad_created",
+            reason=reason_text,
+            command="ads create",
+            campaign_id=campaign_id,
+            ad_group_id=ad_group_id,
+            metadata={"creative_id": creative_id, "status": status_upper},
+            result={"ad": ad},
+        )
     else:
         console.print("[red]Failed to create ad.[/red]")
         raise typer.Exit(1)
@@ -113,6 +142,7 @@ def delete_ad(
     campaign_id: int = typer.Option(..., "--campaign", "-c", help="Campaign ID"),
     ad_group_id: int = typer.Option(..., "--adgroup", "-g", help="Ad group ID"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    reason: Optional[str] = typer.Option(None, "--reason", help="Reason for deleting the ad"),
 ):
     """Delete an ad. WARNING: This is irreversible."""
     credentials = load_credentials()
@@ -128,6 +158,8 @@ def delete_ad(
         console.print(f"[red]Ad {ad_id} not found.[/red]")
         raise typer.Exit(1)
 
+    reason_text = _require_reason(reason, "deleting ad")
+
     console.print(f"\n[bold red]WARNING: About to delete ad:[/bold red]")
     console.print(f"  Name: {ad.get('name', 'Unknown')}")
     console.print(f"  ID: {ad_id}")
@@ -139,6 +171,17 @@ def delete_ad(
     with console.status("[bold blue]Deleting ad..."):
         if client.delete_ad(campaign_id, ad_group_id, ad_id):
             console.print(f"[green]Ad {ad_id} deleted.[/green]")
+            log_manual_decision(
+                event_type="ad_deleted",
+                reason=reason_text,
+                command="ads delete",
+                campaign_id=campaign_id,
+                campaign_name=ad.get("campaignName"),
+                ad_group_id=ad_group_id,
+                ad_group_name=ad.get("adGroupName"),
+                metadata={"ad_id": ad_id, "ad_name": ad.get("name")},
+                result={"success": True},
+            )
         else:
             console.print(f"[red]Failed to delete ad {ad_id}.[/red]")
             raise typer.Exit(1)
@@ -209,7 +252,9 @@ def list_creatives(
 
 @app.command("product-pages")
 def list_product_pages(
-    adam_id: Optional[int] = typer.Option(None, "--adam-id", "-a", help="App Adam ID (uses current app if not set)"),
+    adam_id: Optional[int] = typer.Option(
+        None, "--adam-id", "-a", help="App Adam ID (uses current app if not set)"
+    ),
 ):
     """List custom product pages for an app."""
     credentials = load_credentials()

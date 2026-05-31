@@ -136,13 +136,13 @@ Campaign operations are explicit by default. Use campaign IDs when changing live
 ### 3. Manage Keywords
 
 ```bash
-asa keywords add "ai note taker,voice notes" --type category
-asa keywords add "competitor app,another app" --type competitor
-asa keywords add-negatives "free games,testflight" --all
+asa keywords add "ai note taker,voice notes" --type category --reason "Expand exact coverage for converting note-taking intent"
+asa keywords add "competitor app,another app" --type competitor --reason "Test competitor conquesting at capped bids"
+asa keywords add-negatives "free games,testflight" --all --reason "Block irrelevant traffic seen in search terms"
 
 asa keywords list --campaign 123456789
 asa keywords find "notes"
-asa keywords update-bids-bulk --campaign 123456789 --bid 1.25
+asa keywords update-bids-bulk --campaign 123456789 --bid 1.25 --reason "Normalize bids after CPA review"
 ```
 
 Keyword routing understands the standard Search Results structure:
@@ -341,7 +341,7 @@ Budget status highlights serving and budget problems. Budget pacing turns recent
 
 ## Decision Log
 
-Every serving or spend-affecting workflow should explain why the change exists. Generated plans store action-level reasons, metrics, source, and rule metadata. Direct campaign, ad group, and budget lifecycle commands also require a reason before mutating live account state.
+Every serving or spend-affecting workflow should explain why the change exists. Generated plans store action-level reasons, metrics, source, and rule metadata. Direct campaign, ad group, keyword, ad, geo, and budget lifecycle commands also require a reason before mutating live account state.
 
 ```bash
 asa campaigns pause 123456789 --reason "Duplicate campaign replaced by clean clone"
@@ -412,7 +412,7 @@ The practical rule is simple: keep high-value exact terms controlled, use Discov
 
 - spend-affecting recommendations can be saved as plans first
 - executable plan actions require a reason before save/apply
-- campaign pause/enable/create/update/clone commands capture a reason
+- direct campaign, ad group, keyword, ad, geo, and budget mutations capture a reason
 - destructive actions require explicit commands
 - duplicate keyword errors are handled without failing the whole run
 - bid rules can cap aggressive changes
