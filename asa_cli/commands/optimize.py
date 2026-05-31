@@ -18,6 +18,7 @@ from ..config import (
     RulesConfig,
     RulesLoadError,
     detect_campaign_type,
+    filter_campaigns_for_app,
     get_current_app_config,
     is_multi_app,
     load_credentials,
@@ -61,12 +62,12 @@ def get_campaigns_indexed(
 
     This fetches campaigns once and organizes them for different use cases.
     """
-    campaigns = client.get_campaigns()
+    campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
     by_type: dict[CampaignType, dict] = {}
     managed: list[tuple[dict, CampaignType]] = []
 
     for c in campaigns:
-        ctype = detect_campaign_type(c.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(c.get("name", ""))
         if ctype:
             by_type[ctype] = c
             managed.append((c, ctype))

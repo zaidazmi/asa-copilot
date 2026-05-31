@@ -14,6 +14,7 @@ from ..config import (
     CAMPAIGN_STRUCTURE,
     CampaignType,
     detect_campaign_type,
+    filter_campaigns_for_app,
     get_campaign_name,
     get_current_app_config,
     is_multi_app,
@@ -76,7 +77,7 @@ def list_campaigns(
     app_name = _resolve_app_name()
 
     with console.status("[bold blue]Fetching campaigns..."):
-        campaigns = client.get_campaigns()
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
 
     if not campaigns:
         console.print("[yellow]No campaigns found.[/yellow]")
@@ -86,8 +87,8 @@ def list_campaigns(
     filtered_campaigns = []
     for campaign in campaigns:
         name = campaign.get("name", "")
-        parsed = parse_campaign_name(name, app_name=app_name)
-        ctype = detect_campaign_type(name, app_name=app_name)
+        parsed = parse_campaign_name(name)
+        ctype = detect_campaign_type(name)
 
         # Skip non-managed campaigns unless --all flag
         if not all_campaigns and not parsed:
@@ -145,7 +146,7 @@ def list_campaigns(
 
     for campaign in filtered_campaigns:
         name = campaign.get("name", "")
-        ctype = detect_campaign_type(name, app_name=app_name)
+        ctype = detect_campaign_type(name)
 
         ctype_str = ctype.value if ctype else "-"
         status = campaign.get("displayStatus", campaign.get("status", "UNKNOWN"))
@@ -256,12 +257,12 @@ def setup_campaigns(
 
     # Check for existing campaigns with same type
     with console.status("[bold blue]Checking for existing campaigns..."):
-        existing = client.get_campaigns()
+        existing = filter_campaigns_for_app(client.get_campaigns(), app_config)
 
     existing_types = {
-        parse_campaign_name(c.get("name", ""), app_name=app_name)[1]
+        parse_campaign_name(c.get("name", ""))[1]
         for c in existing
-        if parse_campaign_name(c.get("name", ""), app_name=app_name)
+        if parse_campaign_name(c.get("name", ""))
     }
 
     for ctype, config in CAMPAIGN_STRUCTURE.items():
@@ -346,7 +347,7 @@ def audit_campaigns(
     app_name = _resolve_app_name()
 
     with console.status("[bold blue]Fetching campaigns and ad groups..."):
-        campaigns = client.get_campaigns()
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
 
     if not campaigns:
         console.print("[yellow]No campaigns found.[/yellow]")
@@ -357,7 +358,7 @@ def audit_campaigns(
     unmanaged_campaigns = []
 
     for campaign in campaigns:
-        parsed = parse_campaign_name(campaign.get("name", ""), app_name=app_name)
+        parsed = parse_campaign_name(campaign.get("name", ""))
         if parsed:
             _, ctype, _ = parsed
             managed_campaigns[ctype].append(campaign)
@@ -438,10 +439,8 @@ def pause_campaign(
     app_name = _resolve_app_name()
 
     if all_campaigns:
-        campaigns = client.get_campaigns()
-        managed = [
-            c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-        ]
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
+        managed = [c for c in campaigns if parse_campaign_name(c.get("name", ""))]
 
         if not managed:
             console.print("[yellow]No managed campaigns found.[/yellow]")
@@ -502,10 +501,8 @@ def enable_campaign(
     app_name = _resolve_app_name()
 
     if all_campaigns:
-        campaigns = client.get_campaigns()
-        managed = [
-            c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-        ]
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
+        managed = [c for c in campaigns if parse_campaign_name(c.get("name", ""))]
 
         if not managed:
             console.print("[yellow]No managed campaigns found.[/yellow]")
@@ -843,10 +840,8 @@ def delete_campaign(
     app_name = _resolve_app_name()
 
     if all_unmanaged:
-        campaigns = client.get_campaigns()
-        unmanaged = [
-            c for c in campaigns if not parse_campaign_name(c.get("name", ""), app_name=app_name)
-        ]
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
+        unmanaged = [c for c in campaigns if not parse_campaign_name(c.get("name", ""))]
 
         if not unmanaged:
             console.print("[yellow]No unmanaged campaigns found.[/yellow]")

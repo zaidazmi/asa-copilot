@@ -67,7 +67,7 @@ def collect_keyword_inventory(
     """Fetch active keyword records for managed campaigns."""
     records: list[dict] = []
     for campaign in campaigns:
-        ctype = detect_campaign_type(campaign.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(campaign.get("name", ""))
         if not ctype:
             continue
         for ad_group in client.get_ad_groups(campaign.get("id")):
@@ -106,7 +106,7 @@ def build_guide_hygiene_actions(
     discovery_campaigns: list[dict] = []
 
     for campaign in campaigns:
-        ctype = detect_campaign_type(campaign.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(campaign.get("name", ""))
         if not ctype:
             continue
         managed_campaigns.append((campaign, ctype))

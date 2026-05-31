@@ -390,6 +390,18 @@ class TestKeywordAdGroupReport:
 
         assert result == []
 
+    def test_keyword_adgroup_report_empty_keyword_campaign_error(self, mock_client):
+        """Treat Apple's empty-keyword report error as an empty report."""
+        with patch.object(
+            mock_client,
+            "_request",
+            side_effect=Exception("API error 400: CAMPAIGN DOES NOT CONTAIN KEYWORD"),
+        ) as mock_req:
+            result = mock_client.get_keyword_adgroup_report(123, 456)
+
+        assert result == []
+        assert mock_req.call_args.kwargs["quiet_errors"] is True
+
     def test_keyword_adgroup_report_multiple_keywords(self, mock_client):
         """Test keyword report with multiple keywords and varying recommendations."""
         mock_response = {

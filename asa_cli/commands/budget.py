@@ -16,6 +16,7 @@ from ..api import SearchAdsClient
 from ..config import (
     RulesLoadError,
     detect_campaign_type,
+    filter_campaigns_for_app,
     get_current_app_config,
     is_multi_app,
     load_credentials,
@@ -60,11 +61,11 @@ def _campaign_budget_summaries(
     """Fetch campaign report summaries for budget pacing."""
     end = datetime.now()
     start = end - timedelta(days=days)
-    campaigns = client.get_campaigns()
+    campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
     summaries = []
 
     for campaign in campaigns:
-        ctype = detect_campaign_type(campaign.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(campaign.get("name", ""))
         if app_name and not ctype:
             continue
         rows = client.get_campaign_report(campaign.get("id"), start, end, granularity="DAILY")
@@ -230,6 +231,7 @@ def budget_status(
 
     with console.status("[bold blue]Fetching campaign budget status..."):
         statuses = client.get_campaign_budget_status()
+    statuses = filter_campaigns_for_app(statuses, app_config)
 
     if not statuses:
         console.print("[yellow]No campaigns found.[/yellow]")
@@ -243,14 +245,6 @@ def budget_status(
                 expand=False,
             )
         )
-
-    # Filter to current app if multi-app
-    if app_name:
-        statuses = [
-            s
-            for s in statuses
-            if detect_campaign_type(s.get("name", ""), app_name=app_name) is not None
-        ]
 
     table = Table(
         title="Campaign Budget Health",
@@ -267,7 +261,7 @@ def budget_status(
 
     for entry in statuses:
         name = entry.get("name", "")
-        ctype = detect_campaign_type(name, app_name=app_name)
+        ctype = detect_campaign_type(name)
         ctype_str = ctype.value.upper() if ctype else "-"
 
         daily = entry.get("dailyBudgetAmount") or {}

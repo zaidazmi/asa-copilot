@@ -148,16 +148,26 @@ def check_eligibility(
     table = Table(
         title=f"Eligibility: App {resolved_id}", show_header=True, header_style="bold magenta"
     )
-    table.add_column("Condition", style="cyan")
-    table.add_column("Status")
 
     if isinstance(eligibility, list):
+        table.add_column("Country", style="cyan")
+        table.add_column("Supply Source")
+        table.add_column("Device")
+        table.add_column("Min Age", justify="right")
+        table.add_column("State")
         for item in eligibility:
-            condition = item.get("condition", "-")
-            status = item.get("status", "-")
-            status_style = "green" if status == "ELIGIBLE" else "red"
-            table.add_row(condition, f"[{status_style}]{status}[/{status_style}]")
+            state = item.get("state", item.get("status", "-"))
+            status_style = "green" if state == "ELIGIBLE" else "red"
+            table.add_row(
+                str(item.get("countryOrRegion", "-")),
+                str(item.get("supplySource", item.get("condition", "-"))),
+                str(item.get("deviceClass", "-")),
+                str(item.get("minAge", "-")),
+                f"[{status_style}]{state}[/{status_style}]",
+            )
     elif isinstance(eligibility, dict):
+        table.add_column("Field", style="cyan")
+        table.add_column("Value")
         for key, value in eligibility.items():
             table.add_row(str(key), str(value))
 

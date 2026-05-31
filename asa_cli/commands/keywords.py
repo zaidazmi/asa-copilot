@@ -15,6 +15,7 @@ from ..config import (
     CampaignType,
     MatchType,
     detect_campaign_type,
+    filter_campaigns_for_app,
     get_current_app_config,
     is_multi_app,
     load_credentials,
@@ -52,13 +53,13 @@ def select_campaign(
     client: SearchAdsClient, campaign_type: Optional[CampaignType] = None
 ) -> Optional[dict]:
     """Interactive campaign selection."""
-    campaigns = client.get_campaigns()
+    campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
     app_name = _resolve_app_name()
 
     # Filter campaigns by type if specified
     filtered = []
     for c in campaigns:
-        ctype = detect_campaign_type(c.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(c.get("name", ""))
         if campaign_type is None or ctype == campaign_type:
             filtered.append((c, ctype))
 
@@ -294,14 +295,14 @@ def add_keywords(
 
     # Find campaigns
     with console.status("[bold blue]Finding campaigns..."):
-        campaigns = client.get_campaigns()
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
 
     # Find target campaign and discovery campaign
     target_campaign = None
     discovery_campaign = None
 
     for c in campaigns:
-        ctype = detect_campaign_type(c.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(c.get("name", ""))
         if ctype == campaign_type:
             target_campaign = c
         elif ctype == CampaignType.DISCOVERY:
@@ -497,11 +498,9 @@ def add_negatives(
         if campaign:
             target_campaigns = [campaign]
     elif all_campaigns:
-        campaigns = client.get_campaigns()
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
         # Include campaigns with recognized types
-        target_campaigns = [
-            c for c in campaigns if detect_campaign_type(c.get("name", ""), app_name=app_name)
-        ]
+        target_campaigns = [c for c in campaigns if detect_campaign_type(c.get("name", ""))]
     else:
         campaign = select_campaign(client)
         if campaign:
@@ -605,13 +604,13 @@ def promote_keywords(
 
     # Find campaigns
     with console.status("[bold blue]Finding campaigns..."):
-        campaigns = client.get_campaigns()
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), get_current_app_config())
 
     target_campaign = None
     discovery_campaign = None
 
     for c in campaigns:
-        ctype = detect_campaign_type(c.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(c.get("name", ""))
         if ctype == target_type:
             target_campaign = c
         elif ctype == CampaignType.DISCOVERY:
@@ -1145,12 +1144,12 @@ def research(
 
     # Find a campaign and ad group to use as context
     with console.status("[bold blue]Finding campaigns..."):
-        campaigns = client.get_campaigns()
+        campaigns = filter_campaigns_for_app(client.get_campaigns(), config)
 
     # Prefer Category campaign for recommendations
     target_campaign = None
     for c in campaigns:
-        ctype = detect_campaign_type(c.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(c.get("name", ""))
         if ctype == CampaignType.CATEGORY:
             target_campaign = c
             break
@@ -1158,7 +1157,7 @@ def research(
     if not target_campaign:
         # Fall back to any campaign for this app
         for c in campaigns:
-            ctype = detect_campaign_type(c.get("name", ""), app_name=app_name)
+            ctype = detect_campaign_type(c.get("name", ""))
             if ctype is not None:
                 target_campaign = c
                 break

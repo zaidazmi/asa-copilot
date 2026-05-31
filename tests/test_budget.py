@@ -152,7 +152,9 @@ class TestGetBudgetOrder:
 
     def test_get_budget_order_not_found(self, mock_client):
         """Test fetching a non-existent budget order returns None."""
-        with patch.object(mock_client, "_request", side_effect=Exception("API error 404: Not Found")):
+        with patch.object(
+            mock_client, "_request", side_effect=Exception("API error 404: Not Found")
+        ):
             result = mock_client.get_budget_order(99999)
 
         assert result is None
@@ -275,6 +277,7 @@ class TestCampaignBudgetStatus:
             "data": [
                 {
                     "id": 1,
+                    "adamId": 123456789,
                     "name": "Brand Campaign",
                     "budgetAmount": {"amount": "1500", "currency": "USD"},
                     "dailyBudgetAmount": {"amount": "50", "currency": "USD"},
@@ -323,6 +326,7 @@ class TestCampaignBudgetStatus:
 
         assert len(results) == 2
         assert results[0]["id"] == 1
+        assert results[0]["adamId"] == 123456789
         assert results[0]["name"] == "Brand Campaign"
         assert results[0]["totalSpend"] == 250.50
         assert results[0]["dailyBudgetAmount"]["amount"] == "50"
@@ -356,13 +360,7 @@ class TestCampaignBudgetStatus:
             "pagination": {"totalResults": 1, "startIndex": 0, "itemsPerPage": 1000},
         }
 
-        mock_report = {
-            "data": {
-                "reportingDataResponse": {
-                    "row": []
-                }
-            }
-        }
+        mock_report = {"data": {"reportingDataResponse": {"row": []}}}
 
         def mock_request(method, endpoint, **kwargs):
             if endpoint == "/reports/campaigns":

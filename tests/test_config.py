@@ -17,7 +17,9 @@ from asa_cli.config import (
     MultiAppConfig,
     RulesLoadError,
     cap_bid_change,
+    campaign_matches_app,
     detect_campaign_type,
+    filter_campaigns_for_app,
     get_active_app_config,
     get_app_slug,
     get_campaign_name,
@@ -123,13 +125,31 @@ class TestCampaignTypeDetection:
 
     def test_detect_scoped_accepts_own_app(self):
         """Test scoped detection accepts campaigns for the specified app."""
-        assert detect_campaign_type("ColorCub - Discovery", app_name="ColorCub") == CampaignType.DISCOVERY
-        assert detect_campaign_type("ColorCub - Category", app_name="ColorCub") == CampaignType.CATEGORY
+        assert (
+            detect_campaign_type("ColorCub - Discovery", app_name="ColorCub")
+            == CampaignType.DISCOVERY
+        )
+        assert (
+            detect_campaign_type("ColorCub - Category", app_name="ColorCub")
+            == CampaignType.CATEGORY
+        )
 
     def test_detect_unscoped_matches_any(self):
         """Test unscoped detection matches any campaign with type keyword."""
         assert detect_campaign_type("StitchIt - Brand") == CampaignType.BRAND
         assert detect_campaign_type("ColorCub - Discovery") == CampaignType.DISCOVERY
+
+    def test_campaign_app_filter_prefers_adam_id_over_name(self):
+        """App scoping should not depend on full app names in campaign names."""
+        app = AppConfig(app_id=6751567888, app_name="Lofto: AI Interior Design")
+        campaigns = [
+            {"id": 1, "name": "Lofto - Category - Exact - US", "adamId": 6751567888},
+            {"id": 2, "name": "Noteo - Category - Exact - US", "adamId": 6752323774},
+        ]
+
+        assert campaign_matches_app(campaigns[0], app) is True
+        assert campaign_matches_app(campaigns[1], app) is False
+        assert filter_campaigns_for_app(campaigns, app) == [campaigns[0]]
 
 
 class TestCampaignStructure:

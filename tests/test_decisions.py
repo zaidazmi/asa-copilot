@@ -32,6 +32,27 @@ def test_log_manual_decision_writes_jsonl(tmp_path: Path, monkeypatch):
     assert raw["reason"] == "Poor CPA after 14 day test"
 
 
+def test_log_manual_decision_accepts_keyword_context(tmp_path: Path, monkeypatch):
+    path = tmp_path / "decision-log.jsonl"
+    monkeypatch.setattr("asa_cli.decisions.DECISION_LOG_FILE", path)
+
+    log_manual_decision(
+        event_type="keyword_bids_updated",
+        reason="Raise bids to get impressions",
+        command="keywords update-bids-bulk",
+        keyword_id=123,
+        keywords=["ai interior design"],
+        evidence={"impressions": 0},
+        follow_up_window="24 hours",
+    )
+
+    raw = json.loads(path.read_text().strip())
+    assert raw["keyword_id"] == 123
+    assert raw["keywords"] == ["ai interior design"]
+    assert raw["evidence"]["impressions"] == 0
+    assert raw["follow_up_window"] == "24 hours"
+
+
 def test_load_and_find_decision_by_prefix(tmp_path: Path):
     path = tmp_path / "decision-log.jsonl"
     record = DecisionRecord(event_type="campaign_enabled", reason="App review resolved")

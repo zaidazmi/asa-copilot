@@ -72,7 +72,7 @@ def build_operator_report(
     campaign_summaries: list[dict] = []
 
     for campaign in campaigns:
-        ctype = detect_campaign_type(campaign.get("name", ""), app_name=app_name)
+        ctype = detect_campaign_type(campaign.get("name", ""))
         rows = client.get_campaign_report(campaign.get("id"), start, end, granularity="DAILY")
         campaign_summaries.append(summarize_report_rows(campaign, rows, ctype))
 

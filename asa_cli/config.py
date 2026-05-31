@@ -66,7 +66,9 @@ CAMPAIGN_STRUCTURE: dict[CampaignType, CampaignConfig] = {
         name_suffix="Brand",
         description="Target keywords related to your app/company name",
         ad_groups=[
-            AdGroupConfig(name="Brand-Exact", match_type=MatchType.EXACT, search_match_enabled=False)
+            AdGroupConfig(
+                name="Brand-Exact", match_type=MatchType.EXACT, search_match_enabled=False
+            )
         ],
         recommended_budget=50.0,
     ),
@@ -399,6 +401,7 @@ def cap_bid_change(current_bid: float, proposed_bid: float, rules: RulesConfig) 
 # Multi-app config load / save with legacy migration
 # ---------------------------------------------------------------------------
 
+
 def load_multi_app_config() -> MultiAppConfig:
     """Load multi-app config from config file, migrating legacy format if needed.
 
@@ -482,6 +485,7 @@ def is_multi_app() -> bool:
 # Backward-compatible load/save wrappers
 # ---------------------------------------------------------------------------
 
+
 def load_app_config() -> Optional[AppConfig]:
     """Load app configuration from config file.
 
@@ -509,6 +513,7 @@ def save_app_config(config: AppConfig) -> None:
 # ---------------------------------------------------------------------------
 # Campaign naming (with optional app prefix for multi-app)
 # ---------------------------------------------------------------------------
+
 
 def get_campaign_name(campaign_type: CampaignType, app_name: Optional[str] = None) -> str:
     """Get the campaign name for a type, optionally prefixed with app name.
@@ -548,7 +553,36 @@ def detect_campaign_type(name: str, app_name: Optional[str] = None) -> Optional[
     return None
 
 
-def parse_campaign_name(name: str, app_name: Optional[str] = None) -> Optional[tuple[str, CampaignType, list[str]]]:
+def campaign_matches_app(campaign: dict[str, Any], app_config: Optional[AppConfig]) -> bool:
+    """Return True when a campaign belongs to the active app.
+
+    Apple campaign objects include ``adamId``. Prefer that stable identifier over
+    campaign-name prefixes because real accounts often use shortened app names.
+    """
+    if app_config is None:
+        return True
+    adam_id = campaign.get("adamId")
+    if adam_id is not None:
+        try:
+            return int(adam_id) == int(app_config.app_id)
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def filter_campaigns_for_app(
+    campaigns: list[dict[str, Any]], app_config: Optional[AppConfig] = None
+) -> list[dict[str, Any]]:
+    """Filter campaigns to the active app using adamId when available."""
+    resolved = app_config if app_config is not None else get_current_app_config()
+    if resolved is None:
+        return campaigns
+    return [campaign for campaign in campaigns if campaign_matches_app(campaign, resolved)]
+
+
+def parse_campaign_name(
+    name: str, app_name: Optional[str] = None
+) -> Optional[tuple[str, CampaignType, list[str]]]:
     """Parse a campaign name to detect its type.
 
     This function provides backward compatibility. It now uses simple name detection.
@@ -570,7 +604,9 @@ def prompt_for_credentials() -> Credentials:
     """Interactively prompt for API credentials."""
     console.print("\n[bold]Apple Search Ads API Credentials Setup[/bold]\n")
     console.print("You'll need to create API credentials in Apple Ads dashboard first.")
-    console.print("See: https://ads.apple.com/help/campaigns/0022-use-the-campaign-management-api\n")
+    console.print(
+        "See: https://ads.apple.com/help/campaigns/0022-use-the-campaign-management-api\n"
+    )
 
     org_id = int(Prompt.ask("Organization ID"))
     client_id = Prompt.ask("Client ID")

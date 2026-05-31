@@ -89,6 +89,11 @@ def log_manual_decision(
     campaign_name: Optional[str] = None,
     ad_group_id: Optional[int] = None,
     ad_group_name: Optional[str] = None,
+    keyword_id: Optional[int] = None,
+    keywords: Optional[list[str]] = None,
+    expected_outcome: Optional[str] = None,
+    follow_up_window: Optional[str] = None,
+    evidence: Optional[dict[str, Any]] = None,
     metadata: Optional[dict[str, Any]] = None,
     result: Optional[dict[str, Any]] = None,
 ) -> DecisionRecord:
@@ -105,6 +110,11 @@ def log_manual_decision(
         campaign_name=campaign_name,
         ad_group_id=ad_group_id,
         ad_group_name=ad_group_name,
+        keyword_id=keyword_id,
+        keywords=keywords or [],
+        expected_outcome=expected_outcome,
+        follow_up_window=follow_up_window,
+        evidence=evidence or {},
         metadata=metadata or {},
         result=result or {},
     )

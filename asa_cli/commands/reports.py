@@ -14,6 +14,8 @@ from ..api import SearchAdsClient
 from ..config import (
     CampaignType,
     RulesLoadError,
+    detect_campaign_type,
+    filter_campaigns_for_app,
     get_current_app_config,
     is_multi_app,
     load_credentials,
@@ -55,26 +57,24 @@ def _resolve_app_name() -> Optional[str]:
 
 def get_campaign_type_label(campaign_name: str, app_name: Optional[str] = None) -> str:
     """Get campaign type label from name, supporting both simple and managed naming."""
-    parsed = parse_campaign_name(campaign_name, app_name=app_name)
-    if parsed:
-        return parsed[1].value.upper()
-    # Support simple naming (Brand, Category, Competitor, Discovery)
-    name_lower = campaign_name.lower()
-    for ctype in ["brand", "category", "competitor", "discovery"]:
-        if ctype in name_lower:
-            return ctype.upper()
+    ctype = detect_campaign_type(campaign_name)
+    if ctype:
+        return ctype.value.upper()
     return campaign_name[:15]
 
 
 def _filter_current_app_campaigns(client: SearchAdsClient) -> tuple[list[dict], Optional[str]]:
     """Fetch campaigns, scoped to the active app when multi-app config is in use."""
     campaigns = client.get_campaigns()
+    app_config = get_current_app_config()
     app_name = _resolve_app_name()
-    if app_name:
-        campaigns = [
-            c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-        ]
+    campaigns = filter_campaigns_for_app(campaigns, app_config)
     return campaigns, app_name
+
+
+def _scope_campaigns(campaigns: list[dict]) -> list[dict]:
+    """Scope campaign lists to the active app by adamId."""
+    return filter_campaigns_for_app(campaigns, get_current_app_config())
 
 
 def _display_operator_report(report: dict, title: str) -> None:
@@ -279,11 +279,7 @@ def report_summary(
 
     app_name = _resolve_app_name()
 
-    # Filter campaigns to current app first (in multi-app mode)
-    if app_name:
-        campaigns = [
-            c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-        ]
+    campaigns = _scope_campaigns(campaigns)
 
     # Filter campaigns based on flag
     if all_campaigns:
@@ -292,9 +288,7 @@ def report_summary(
         ]
     else:
         # Only managed campaigns with specific naming
-        managed = [
-            (c, parse_campaign_name(c.get("name", ""), app_name=app_name)) for c in campaigns
-        ]
+        managed = [(c, parse_campaign_name(c.get("name", ""))) for c in campaigns]
         campaign_list = [(c, p[1].value.upper()) for c, p in managed if p]
 
     if not campaign_list:
@@ -413,11 +407,7 @@ def report_keywords(
         campaigns = client.get_campaigns()
         app_name = _resolve_app_name()
 
-        # Filter to current app in multi-app mode
-        if app_name:
-            campaigns = [
-                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-            ]
+        campaigns = _scope_campaigns(campaigns)
 
         if not campaigns:
             console.print("[yellow]No campaigns found.[/yellow]")
@@ -550,11 +540,7 @@ def report_adgroups(
     app_name = _resolve_app_name()
 
     def _filter_by_app(campaigns: list) -> list:
-        if app_name:
-            return [
-                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-            ]
-        return campaigns
+        return _scope_campaigns(campaigns)
 
     if all_campaigns:
         campaigns = _filter_by_app(client.get_campaigns())
@@ -738,11 +724,7 @@ def report_impression_share(
     app_name = _resolve_app_name()
 
     def _filter_by_app(campaigns: list) -> list:
-        if app_name:
-            return [
-                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-            ]
-        return campaigns
+        return _scope_campaigns(campaigns)
 
     if all_campaigns:
         campaigns = _filter_by_app(client.get_campaigns())
@@ -987,16 +969,12 @@ def report_search_terms(
         campaigns = client.get_campaigns()
         app_name = _resolve_app_name()
 
-        # Filter to current app in multi-app mode
-        if app_name:
-            campaigns = [
-                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-            ]
+        campaigns = _scope_campaigns(campaigns)
 
         discovery = None
         for c in campaigns:
             name = c.get("name", "")
-            parsed = parse_campaign_name(name, app_name=app_name)
+            parsed = parse_campaign_name(name)
             # Support both managed naming and simple naming (e.g., "Discovery")
             if (parsed and parsed[1] == CampaignType.DISCOVERY) or "discovery" in name.lower():
                 discovery = c
@@ -1338,11 +1316,7 @@ def report_ads(
     app_name = _resolve_app_name()
 
     def _filter_by_app(campaigns: list) -> list:
-        if app_name:
-            return [
-                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-            ]
-        return campaigns
+        return _scope_campaigns(campaigns)
 
     if all_campaigns:
         campaigns = _filter_by_app(client.get_campaigns())
@@ -1495,11 +1469,7 @@ def report_bid_recommendations(
     keyword_rows = []
 
     def _filter_by_app(campaigns: list) -> list:
-        if app_name:
-            return [
-                c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)
-            ]
-        return campaigns
+        return _scope_campaigns(campaigns)
 
     if all_campaigns:
         campaigns = _filter_by_app(client.get_campaigns())
@@ -1570,6 +1540,10 @@ def report_bid_recommendations(
         for ag in ad_groups:
             ag_id = ag.get("id")
             ag_name = ag.get("name", "Unknown")
+
+            keywords = client.get_keywords(cid, ag_id)
+            if not keywords:
+                continue
 
             if output_json:
                 report_data = client.get_keyword_adgroup_report(cid, ag_id, start, end)

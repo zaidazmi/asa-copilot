@@ -103,6 +103,7 @@ class SearchAdsClient:
         params: Optional[dict] = None,
         _retry_count: int = 0,
         skip_org_context: bool = False,
+        quiet_errors: bool = False,
     ) -> dict[str, Any]:
         """Make an authenticated API request with automatic retry on auth failure.
 
@@ -113,6 +114,7 @@ class SearchAdsClient:
             params: Query parameters
             _retry_count: Internal retry counter (do not set manually)
             skip_org_context: If True, omit the X-AP-Context header (for /acls, /me)
+            quiet_errors: If True, raise API errors without printing them first
 
         Returns:
             API response as dict
@@ -149,11 +151,14 @@ class SearchAdsClient:
             self._access_token = None
             self._token_expiry = None
             # Retry the request
-            return self._request(method, endpoint, data, params, _retry_count + 1, skip_org_context)
+            return self._request(
+                method, endpoint, data, params, _retry_count + 1, skip_org_context, quiet_errors
+            )
 
         if response.status_code >= 400:
             error_msg = f"API error {response.status_code}: {response.text}"
-            console.print(f"[red]{error_msg}[/red]")
+            if not quiet_errors:
+                console.print(f"[red]{error_msg}[/red]")
             raise Exception(error_msg)
 
         if response.status_code == 204:  # No content
@@ -1373,6 +1378,7 @@ class SearchAdsClient:
             cid = campaign.get("id")
             results.append({
                 "id": cid,
+                "adamId": campaign.get("adamId"),
                 "name": campaign.get("name", ""),
                 "budgetAmount": campaign.get("budgetAmount"),
                 "dailyBudgetAmount": campaign.get("dailyBudgetAmount"),
@@ -2008,7 +2014,7 @@ class SearchAdsClient:
                     "pagination": {"offset": 0, "limit": 1000},
                 },
                 "timeZone": "UTC",
-                "returnRecordsWithNoMetrics": False,
+                "returnRecordsWithNoMetrics": True,
                 "returnRowTotals": True,
             }
 
@@ -2016,9 +2022,12 @@ class SearchAdsClient:
                 "POST",
                 f"/reports/campaigns/{campaign_id}/adgroups/{ad_group_id}/keywords",
                 data=report_request,
+                quiet_errors=True,
             )
             return response.get("data", {}).get("reportingDataResponse", {}).get("row", [])
         except Exception as e:
+            if "DOES NOT CONTAIN KEYWORD" in str(e):
+                return []
             console.print(
                 f"[red]Error fetching keyword report for campaign {campaign_id} "
                 f"ad group {ad_group_id}: {e}[/red]"
