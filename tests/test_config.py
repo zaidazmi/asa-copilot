@@ -230,6 +230,57 @@ class TestCredentials:
             assert loaded.org_id == 123456
             assert loaded.client_id == "test_client"
 
+    def test_load_credentials_from_environment(self, monkeypatch):
+        """Environment credentials allow stateless automation."""
+        monkeypatch.setenv("ASA_ORG_ID", "987654")
+        monkeypatch.setenv("ASA_CLIENT_ID", "env_client")
+        monkeypatch.setenv("ASA_TEAM_ID", "env_team")
+        monkeypatch.setenv("ASA_KEY_ID", "env_key")
+        monkeypatch.setenv("ASA_PRIVATE_KEY_PATH", "/tmp/env-key.pem")
+
+        with patch("asa_cli.config.CREDENTIALS_FILE", Path("/tmp/missing-credentials.json")):
+            loaded = load_credentials()
+
+        assert loaded is not None
+        assert loaded.org_id == 987654
+        assert loaded.client_id == "env_client"
+        assert loaded.private_key_path == "/tmp/env-key.pem"
+
+    def test_environment_credentials_override_file(self, monkeypatch, tmp_path):
+        """Environment credentials take precedence over the local credentials file."""
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text(
+            json.dumps(
+                {
+                    "org_id": 111,
+                    "client_id": "file_client",
+                    "team_id": "file_team",
+                    "key_id": "file_key",
+                    "private_key_path": "/tmp/file.pem",
+                }
+            )
+        )
+        monkeypatch.setenv("ASA_ORG_ID", "222")
+        monkeypatch.setenv("ASA_CLIENT_ID", "env_client")
+        monkeypatch.setenv("ASA_TEAM_ID", "env_team")
+        monkeypatch.setenv("ASA_KEY_ID", "env_key")
+        monkeypatch.setenv("ASA_PRIVATE_KEY_PATH", "/tmp/env.pem")
+
+        with patch("asa_cli.config.CREDENTIALS_FILE", creds_file):
+            loaded = load_credentials()
+
+        assert loaded is not None
+        assert loaded.org_id == 222
+        assert loaded.client_id == "env_client"
+
+    def test_incomplete_environment_credentials_return_none(self, monkeypatch, tmp_path):
+        """Partial environment credentials should fail closed without noisy stdout."""
+        monkeypatch.setenv("ASA_ORG_ID", "222")
+        with patch("asa_cli.config.CREDENTIALS_FILE", tmp_path / "missing.json"):
+            loaded = load_credentials()
+
+        assert loaded is None
+
 
 class TestAppConfig:
     """Tests for app configuration."""

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from math import isinf
 from pathlib import Path
 from typing import Optional
@@ -24,6 +23,7 @@ from ..config import (
     load_rules,
 )
 from ..guide_hygiene import build_guide_hygiene_actions
+from ..output import print_json, print_json_error
 from ..plans import PlanAction, PlanActionType, save_plan
 from .optimize import (
     analyze_search_terms,
@@ -177,7 +177,7 @@ def mine_search_terms(
         )
     except (RulesLoadError, ValueError) as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
@@ -187,7 +187,7 @@ def mine_search_terms(
     credentials = load_credentials()
     if not credentials:
         if output_json:
-            print(json.dumps({"error": "No credentials configured"}))
+            print_json_error("No credentials configured")
         else:
             console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
@@ -200,7 +200,7 @@ def mine_search_terms(
     target_type = target_type_map.get(target.lower())
     if target_type is None:
         if output_json:
-            print(json.dumps({"error": f"Invalid target type: {target}"}))
+            print_json_error(f"Invalid target type: {target}")
         else:
             console.print("[red]Invalid target type. Use brand, category, or competitor.[/red]")
         raise typer.Exit(1)
@@ -219,7 +219,7 @@ def mine_search_terms(
             missing.append(target_type.value)
         message = f"Missing required campaign(s): {', '.join(missing)}"
         if output_json:
-            print(json.dumps({"error": message}))
+            print_json_error(message)
         else:
             console.print(f"[red]{message}[/red]")
         raise typer.Exit(1)
@@ -279,7 +279,7 @@ def mine_search_terms(
         action.metadata.setdefault("rules", rules.model_dump(mode="json"))
 
     if output_json:
-        print(plan.model_dump_json(indent=2))
+        print_json(plan.model_dump(mode="json"))
         return
 
     if out:

@@ -25,6 +25,7 @@ from .commands import (
 from .config import set_current_app
 from .api import SearchAdsClient
 from .config import load_credentials
+from .output import print_json, print_json_error, set_json_format
 from .plans import (
     PlanLoadError,
     PlanReasonError,
@@ -244,7 +245,6 @@ def apply_plan_cmd(
     actor: str = typer.Option("cli", "--actor", help="Actor recorded in the decision log"),
 ):
     """Apply a saved change plan and record it in local audit history."""
-    import json
     from pathlib import Path
     from rich.prompt import Confirm
 
@@ -252,7 +252,7 @@ def apply_plan_cmd(
         change_plan = load_plan(Path(path))
     except PlanLoadError as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
@@ -260,7 +260,7 @@ def apply_plan_cmd(
     credentials = load_credentials()
     if not credentials:
         if output_json:
-            print(json.dumps({"error": "No credentials configured"}))
+            print_json_error("No credentials configured")
         else:
             console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
@@ -276,14 +276,14 @@ def apply_plan_cmd(
         result = apply_plan(client, change_plan)
     except (PlanReasonError, PlanScopeError) as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
     save_applied_plan(change_plan, result, actor=actor, approval_note=note)
 
     if output_json:
-        print(json.dumps(result.model_dump(mode="json"), indent=2))
+        print_json(result.model_dump(mode="json"))
         return
 
     display_apply_result(result)
@@ -299,8 +299,19 @@ def main(
         help="App slug to operate on (e.g., 'stitchit', 'colorcub'). Overrides active app.",
         envvar="ASA_APP",
     ),
+    output_format: str = typer.Option(
+        "json",
+        "--format",
+        help="JSON output format for --json commands: json, pretty, or compact.",
+    ),
 ):
     """Apple Search Ads operations CLI."""
+    try:
+        set_json_format(output_format)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
     if app_slug:
         try:
             set_current_app(app_slug)

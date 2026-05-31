@@ -310,8 +310,38 @@ def ensure_config_dir() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _env_credentials() -> Optional[Credentials]:
+    """Load credentials from environment variables when all required values exist."""
+    values = {
+        "org_id": os.getenv("ASA_ORG_ID") or os.getenv("APPLE_ADS_ORG_ID"),
+        "client_id": os.getenv("ASA_CLIENT_ID") or os.getenv("APPLE_ADS_CLIENT_ID"),
+        "team_id": os.getenv("ASA_TEAM_ID") or os.getenv("APPLE_ADS_TEAM_ID"),
+        "key_id": os.getenv("ASA_KEY_ID") or os.getenv("APPLE_ADS_KEY_ID"),
+        "private_key_path": os.getenv("ASA_PRIVATE_KEY_PATH")
+        or os.getenv("APPLE_ADS_PRIVATE_KEY_PATH"),
+        "public_key_path": os.getenv("ASA_PUBLIC_KEY_PATH")
+        or os.getenv("APPLE_ADS_PUBLIC_KEY_PATH"),
+    }
+    required = ["org_id", "client_id", "team_id", "key_id", "private_key_path"]
+    if not any(values.get(key) for key in required):
+        return None
+    missing = [key for key in required if not values.get(key)]
+    if missing:
+        raise ValueError(
+            "Incomplete environment credentials; missing: " + ", ".join(sorted(missing))
+        )
+    return Credentials(**{key: value for key, value in values.items() if value is not None})
+
+
 def load_credentials() -> Optional[Credentials]:
-    """Load credentials from config file."""
+    """Load credentials from environment variables or config file."""
+    try:
+        env_credentials = _env_credentials()
+    except ValueError:
+        return None
+    if env_credentials is not None:
+        return env_credentials
+
     if not CREDENTIALS_FILE.exists():
         return None
     try:

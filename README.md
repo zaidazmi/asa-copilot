@@ -51,10 +51,12 @@ Nothing touches your account without going through a reviewable JSON plan first.
 | Guide hygiene | Catch duplicate keywords, missing Discovery negatives, Search Match drift |
 | Optimization rules | Raise/lower bids, pause poor keywords, add negatives — all configurable |
 | Operator reports | Daily and weekly briefs with spend, installs, CPA, and next actions |
+| Raw reports | Pull grouped Apple report payloads for country/device/date analysis |
 | Budget pacing | Flag capped winners, cut inefficient campaigns |
 | Campaign tools | Create, clone, update, pause, enable, audit |
 | Keyword tools | Add, route, promote, bid-update, manage negatives |
-| Multi-app | Manage multiple apps with `--app <slug>`; plans and campaign IDs are scoped by app `adamId` |
+| Multi-app | Discover apps, manage app slugs with `--app <slug>`, and scope plans by `adamId` |
+| Automation | `--json`, `--format compact`, and consistent JSON errors for scripts |
 
 ---
 
@@ -80,6 +82,7 @@ pytest
 
 ```bash
 asa config setup
+asa config discover-app "Your App"
 asa config test
 asa config show
 ```
@@ -109,6 +112,18 @@ openssl ec -in apple-ads-private-key.pem -pubout -out apple-ads-public-key.pem
 ```
 
 Upload only the public key. Use the private key path during `asa config setup`.
+
+For CI or ephemeral shells, credentials can also come from environment variables:
+
+```bash
+export ASA_ORG_ID=123456789
+export ASA_CLIENT_ID=SEARCHADS.xxxxx
+export ASA_TEAM_ID=SEARCHADS.xxxxx
+export ASA_KEY_ID=xxxxx
+export ASA_PRIVATE_KEY_PATH=/secure/apple-ads-private-key.pem
+```
+
+`APPLE_ADS_*` aliases are also accepted for the same fields. Environment credentials take precedence over `~/.asa-cli/credentials.json`.
 
 ---
 
@@ -241,6 +256,7 @@ asa reports keywords --sort cpa
 asa reports search-terms --winners
 asa reports impression-share --all
 asa reports bid-recommendations --rules asa-rules.json
+asa reports raw --campaign 123456789 --group-by countryOrRegion,deviceClass --json
 asa reports ads
 
 # Async exports
@@ -287,11 +303,18 @@ Keep high-value exact terms controlled, use Discovery to learn, and avoid biddin
 - Applied plans and decision records are stored locally
 - JSON output is available for automation and scheduled runs
 
+Compact JSON is useful for shell pipelines:
+
+```bash
+asa --format compact reports raw --campaign 123456789 --json
+```
+
 ---
 
 ## Multi-app
 
 ```bash
+asa config discover-app "My App"
 asa config add-app
 asa config list-apps
 asa config switch myapp
@@ -304,11 +327,21 @@ asa --app secondapp search-terms mine --out secondapp-plan.json
 
 ---
 
+## Command reference
+
+See [COMMANDS.md](COMMANDS.md) for generated CLI help. Regenerate it after command changes:
+
+```bash
+python scripts/generate_command_reference.py
+```
+
+---
+
 ## Local checks
 
 ```bash
 pytest
-python -m py_compile $(find asa_cli -name '*.py' -print)
+python -m compileall asa_cli
 asa search-terms mine --help
 asa report weekly --help
 asa budget pacing --help

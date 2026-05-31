@@ -1023,6 +1023,50 @@ class SearchAdsClient:
             console.print(f"[red]Error fetching campaign report: {e}[/red]")
             return []
 
+    def get_raw_campaign_report(
+        self,
+        campaign_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        granularity: str = "DAILY",
+        group_by: Optional[list[str]] = None,
+        return_records_with_no_metrics: bool = False,
+    ) -> dict[str, Any]:
+        """Get a raw campaign report payload with optional Apple report grouping."""
+        end = end_date or datetime.now()
+        start = start_date or (end - timedelta(days=30))
+
+        try:
+            report_request: dict[str, Any] = {
+                "startTime": start.strftime("%Y-%m-%d"),
+                "endTime": end.strftime("%Y-%m-%d"),
+                "selector": {
+                    "conditions": [
+                        {
+                            "field": "campaignId",
+                            "operator": "EQUALS",
+                            "values": [str(campaign_id)],
+                        }
+                    ],
+                    "orderBy": [{"field": "localSpend", "sortOrder": "DESCENDING"}],
+                    "pagination": {"offset": 0, "limit": 1000},
+                },
+                "timeZone": "UTC",
+                "returnRecordsWithNoMetrics": return_records_with_no_metrics,
+                "returnRowTotals": True,
+                "returnGrandTotals": True,
+            }
+            if granularity:
+                report_request["granularity"] = granularity
+            if group_by:
+                report_request["groupBy"] = group_by
+
+            response = self._request("POST", "/reports/campaigns", data=report_request)
+            return response if isinstance(response, dict) else {"data": response}
+        except Exception as e:
+            console.print(f"[red]Error fetching raw campaign report: {e}[/red]")
+            return {}
+
     def get_keyword_report(
         self,
         campaign_id: int,

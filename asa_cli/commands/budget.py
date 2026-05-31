@@ -1,6 +1,5 @@
 """Budget management commands."""
 
-import json
 import sys
 from datetime import datetime, timedelta
 from typing import Optional
@@ -24,6 +23,7 @@ from ..config import (
 )
 from ..decisions import log_manual_decision
 from ..operator_reports import build_budget_pacing_actions, summarize_report_rows
+from ..output import print_json, print_json_error
 from ..plans import ChangePlan, save_plan
 
 app = typer.Typer(help="Budget management commands")
@@ -338,7 +338,7 @@ def budget_pacing(
     if sum([bool(daily), bool(month), days is not None]) > 1:
         message = "Use only one of --daily, --month, or --days"
         if output_json:
-            print(json.dumps({"error": message}))
+            print_json_error(message)
         else:
             console.print(f"[red]{message}[/red]")
         raise typer.Exit(1)
@@ -346,7 +346,7 @@ def budget_pacing(
     resolved_days = 1 if daily else 30 if month else days or 7
     if resolved_days <= 0:
         if output_json:
-            print(json.dumps({"error": "Days must be a positive integer"}))
+            print_json_error("Days must be a positive integer")
         else:
             console.print("[red]Days must be a positive integer.[/red]")
         raise typer.Exit(1)
@@ -354,7 +354,7 @@ def budget_pacing(
     credentials = load_credentials()
     if not credentials:
         if output_json:
-            print(json.dumps({"error": "No credentials configured"}))
+            print_json_error("No credentials configured")
         else:
             console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
@@ -364,7 +364,7 @@ def budget_pacing(
         rules = load_rules(rules_file, app_config=app_config)
     except RulesLoadError as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
@@ -395,15 +395,12 @@ def budget_pacing(
             return
 
     if output_json:
-        print(
-            json.dumps(
-                {
-                    "days": resolved_days,
-                    "campaigns": summaries,
-                    "plan": plan.model_dump(mode="json"),
-                },
-                indent=2,
-            )
+        print_json(
+            {
+                "days": resolved_days,
+                "campaigns": summaries,
+                "plan": plan.model_dump(mode="json"),
+            }
         )
         return
 

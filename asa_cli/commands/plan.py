@@ -1,12 +1,12 @@
 """Plan review commands."""
 
-import json
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
 from ..plans import PlanLoadError, display_plan, load_plan
+from ..output import print_json, print_json_error
 
 app = typer.Typer(help="Review saved change plans")
 console = Console()
@@ -22,12 +22,12 @@ def show_plan(
         plan = load_plan(path)
     except PlanLoadError as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
     if output_json:
-        print(json.dumps(plan.model_dump(mode="json"), indent=2))
+        print_json(plan.model_dump(mode="json"))
         return
     display_plan(plan)

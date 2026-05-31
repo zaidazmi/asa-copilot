@@ -1,6 +1,5 @@
 """Automated campaign optimization commands."""
 
-import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -31,6 +30,7 @@ from ..plans import (
     save_applied_plan,
     save_plan,
 )
+from ..output import print_json, print_json_error
 from ..recommendations import build_search_term_recommendations
 
 app = typer.Typer(help="Automated campaign optimization")
@@ -532,7 +532,7 @@ def optimize_cmd(
         rules = load_rules(rules_file, app_config=app_config)
     except RulesLoadError as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
@@ -551,7 +551,7 @@ def optimize_cmd(
         )
     except ValueError as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
@@ -566,7 +566,7 @@ def optimize_cmd(
     credentials = load_credentials()
     if not credentials:
         if output_json:
-            print(json.dumps({"error": "No credentials configured"}))
+            print_json_error("No credentials configured")
         else:
             console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
@@ -579,7 +579,7 @@ def optimize_cmd(
 
     if target.lower() not in target_type_map:
         if output_json:
-            print(json.dumps({"error": f"Invalid target type: {target}"}))
+            print_json_error(f"Invalid target type: {target}")
         else:
             console.print(
                 f"[red]Invalid target type: {target}. Use brand, category, or competitor.[/red]"
@@ -603,7 +603,7 @@ def optimize_cmd(
 
     if not discovery_campaign:
         if output_json:
-            print(json.dumps({"error": "No Discovery campaign found"}))
+            print_json_error("No Discovery campaign found")
         else:
             console.print("[red]No Discovery campaign found.[/red]")
             console.print("[yellow]Tip: Create a campaign with 'Discovery' in the name.[/yellow]")
@@ -611,7 +611,7 @@ def optimize_cmd(
 
     if not target_campaign:
         if output_json:
-            print(json.dumps({"error": f"No {target_type.value} campaign found"}))
+            print_json_error(f"No {target_type.value} campaign found")
         else:
             console.print(f"[red]No {target_type.value} campaign found.[/red]")
             console.print(
@@ -679,7 +679,7 @@ def optimize_cmd(
     # JSON output mode
     if output_json:
         output_data = optimization_plan.model_dump(mode="json")
-        print(json.dumps(output_data, indent=2))
+        print_json(output_data)
         return
 
     if out:

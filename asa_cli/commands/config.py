@@ -9,6 +9,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.table import Table
 
+from ..api import SearchAdsClient
 from ..config import (
     CONFIG_FILE,
     CREDENTIALS_FILE,
@@ -27,9 +28,18 @@ from ..config import (
     save_credentials,
     save_multi_app_config,
 )
+from ..output import print_json, print_json_error
 
 app = typer.Typer(help="Configuration management commands")
 console = Console()
+
+ASA_COPILOT_BANNER = r"""
+   ___   _____ ___       ___          _ __      __
+  / _ | / ___// _ | ____/ _ \___ ___ (_) /___  / /_
+ / __ |_\ \ / __ |/___/ ___/ _ `/ // / / __/ / __/
+/_/ |_/___//_/ |_|   /_/   \_,_/\_, /_/\__/  \__/
+                                /___/
+"""
 
 
 @app.command("setup")
@@ -38,6 +48,7 @@ def setup_config(
     app_only: bool = typer.Option(False, "--app", "-a", help="Only configure app settings"),
 ):
     """Set up API credentials and app configuration."""
+    console.print(f"[cyan]{ASA_COPILOT_BANNER}[/cyan]")
     if not app_only:
         console.print(Panel("[bold]Step 1: API Credentials[/bold]", expand=False))
 
@@ -232,6 +243,49 @@ def add_app():
         console.print(f"[cyan]Active app set to: {slug}[/cyan]")
     else:
         console.print(f"[dim]Active app is: {multi.active_app}. Switch with 'asa config switch {slug}'.[/dim]")
+
+
+@app.command("discover-app")
+def discover_app(
+    query: str = typer.Argument(..., help="App Store search query"),
+    owned: bool = typer.Option(True, "--owned/--all", help="Only show apps owned by this org"),
+    limit: int = typer.Option(10, "--limit", min=1, max=50, help="Maximum results"),
+    output_json: bool = typer.Option(False, "--json", help="Output app results as JSON"),
+):
+    """Search App Store apps and show adam_id values for configuration."""
+    credentials = load_credentials()
+    if not credentials:
+        if output_json:
+            print_json_error("No credentials configured")
+        else:
+            console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+    apps = client.search_apps(query, return_owned=owned, limit=limit)
+
+    if output_json:
+        print_json({"query": query, "owned_only": owned, "apps": apps})
+        return
+
+    if not apps:
+        console.print(f"[yellow]No apps found for '{query}'.[/yellow]")
+        return
+
+    table = Table(title=f"App Discovery: {query}", show_header=True, header_style="bold magenta")
+    table.add_column("adam_id", style="cyan")
+    table.add_column("App")
+    table.add_column("Developer")
+    table.add_column("Countries")
+    for app_record in apps:
+        adam_id = app_record.get("adamId") or app_record.get("adam_id") or app_record.get("id")
+        app_name = app_record.get("appName") or app_record.get("name") or ""
+        developer = app_record.get("developerName") or app_record.get("artistName") or ""
+        countries = app_record.get("countriesOrRegions") or app_record.get("countries") or []
+        table.add_row(str(adam_id or ""), app_name, developer, ", ".join(countries[:8]))
+
+    console.print(table)
+    console.print("\n[dim]Use the adam_id with 'asa config add-app' or during 'asa config setup'.[/dim]")
 
 
 @app.command("list-apps")

@@ -1,6 +1,5 @@
 """Reporting commands."""
 
-import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -24,6 +23,7 @@ from ..config import (
 )
 from ..plans import ChangePlan, save_plan
 from ..operator_reports import build_operator_report
+from ..output import json_dumps, print_json, print_json_error
 from ..recommendations import build_keyword_recommendations, keyword_report_row_to_metrics
 from .scope import require_campaign_in_current_app
 
@@ -146,7 +146,7 @@ def _run_operator_report(
     """Shared implementation for daily and weekly reports."""
     if days <= 0:
         if output_json:
-            print(json.dumps({"error": "Days must be a positive integer"}))
+            print_json_error("Days must be a positive integer")
         else:
             console.print("[red]Days must be a positive integer.[/red]")
         raise typer.Exit(1)
@@ -154,7 +154,7 @@ def _run_operator_report(
     credentials = load_credentials()
     if not credentials:
         if output_json:
-            print(json.dumps({"error": "No credentials configured"}))
+            print_json_error("No credentials configured")
         else:
             console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
@@ -164,7 +164,7 @@ def _run_operator_report(
         rules = load_rules(rules_file, app_config=app_config)
     except RulesLoadError as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
@@ -182,14 +182,14 @@ def _run_operator_report(
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w") as f:
-            json.dump(report, f, indent=2)
+            f.write(json_dumps(report))
             f.write("\n")
         if not output_json:
             console.print(f"[green]Report saved to {out}[/green]")
             return
 
     if output_json:
-        print(json.dumps(report, indent=2))
+        print_json(report)
         return
 
     _display_operator_report(report, title)
@@ -1414,6 +1414,115 @@ def report_ads(
         console.print()
 
 
+@app.command("raw")
+def report_raw(
+    campaign_id: int = typer.Option(..., "--campaign", "-c", help="Campaign ID"),
+    days: int = typer.Option(7, "--days", "-d", min=1, help="Number of days"),
+    start_date: Optional[str] = typer.Option(None, "--start", help="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, "--end", help="End date (YYYY-MM-DD)"),
+    granularity: str = typer.Option("DAILY", "--granularity", help="DAILY, WEEKLY, MONTHLY"),
+    group_by: Optional[str] = typer.Option(
+        None,
+        "--group-by",
+        help="Comma-separated Apple report grouping fields, e.g. countryOrRegion,deviceClass",
+    ),
+    return_empty: bool = typer.Option(
+        False,
+        "--return-records-with-no-metrics",
+        help="Include rows with no metrics",
+    ),
+    output_json: bool = typer.Option(False, "--json", help="Output raw report JSON"),
+    out: Optional[Path] = typer.Option(None, "--out", help="Write raw report JSON to this path"),
+):
+    """Fetch a raw campaign report with optional Apple report groupBy fields."""
+    credentials = load_credentials()
+    if not credentials:
+        if output_json or out:
+            print_json_error("No credentials configured")
+        else:
+            console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    try:
+        end = parse_date(end_date) if end_date else datetime.now()
+        start = parse_date(start_date) if start_date else end - timedelta(days=days)
+    except ValueError:
+        if output_json or out:
+            print_json_error("Dates must use YYYY-MM-DD")
+        else:
+            console.print("[red]Dates must use YYYY-MM-DD.[/red]")
+        raise typer.Exit(1)
+
+    groups = [part.strip() for part in group_by.split(",") if part.strip()] if group_by else None
+    client = SearchAdsClient(credentials)
+    try:
+        campaign = require_campaign_in_current_app(client, campaign_id)
+    except ValueError as exc:
+        if output_json or out:
+            print_json_error(str(exc))
+        else:
+            console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    request = {
+        "campaign_id": campaign_id,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "granularity": granularity,
+        "group_by": groups or [],
+        "return_records_with_no_metrics": return_empty,
+    }
+    raw = client.get_raw_campaign_report(
+        campaign_id=campaign_id,
+        start_date=start,
+        end_date=end,
+        granularity=granularity,
+        group_by=groups,
+        return_records_with_no_metrics=return_empty,
+    )
+    payload = {
+        "campaign": {
+            "id": campaign.get("id"),
+            "name": campaign.get("name"),
+            "adam_id": campaign.get("adamId"),
+        },
+        "request": request,
+        "data": raw.get("data", raw),
+    }
+
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w") as f:
+            f.write(json_dumps(payload))
+            f.write("\n")
+        if not output_json:
+            console.print(f"[green]Raw report saved to {out}[/green]")
+            return
+
+    if output_json:
+        print_json(payload)
+        return
+
+    rows = (
+        payload["data"]
+        .get("reportingDataResponse", {})
+        .get("row", [])
+        if isinstance(payload["data"], dict)
+        else []
+    )
+    console.print(
+        Panel(
+            f"[bold]Raw Campaign Report[/bold]\n"
+            f"{campaign.get('name')} | {request['start_date']} to {request['end_date']}",
+            expand=False,
+        )
+    )
+    console.print(f"Rows: [bold]{len(rows)}[/bold]")
+    if groups:
+        console.print(f"Grouped by: [cyan]{', '.join(groups)}[/cyan]")
+    console.print("[dim]Use --json or --out to inspect the full raw payload.[/dim]")
+
+
 @app.command("bid-recommendations")
 def report_bid_recommendations(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
@@ -1436,7 +1545,7 @@ def report_bid_recommendations(
     credentials = load_credentials()
     if not credentials:
         if output_json:
-            print(json.dumps({"error": "No credentials configured"}))
+            print_json_error("No credentials configured")
         else:
             console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
@@ -1446,7 +1555,7 @@ def report_bid_recommendations(
         rules = load_rules(rules_file, app_config=app_config)
     except RulesLoadError as exc:
         if output_json:
-            print(json.dumps({"error": str(exc)}))
+            print_json_error(str(exc))
         else:
             console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
@@ -1652,7 +1761,7 @@ def report_bid_recommendations(
     )
 
     if output_json:
-        print(json.dumps(recommendation_plan.model_dump(mode="json"), indent=2))
+        print_json(recommendation_plan.model_dump(mode="json"))
         return
 
     if out:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ..decisions import decisions_to_markdown, find_decision, load_decisions
+from ..output import print_json, print_json_error
 
 app = typer.Typer(help="Decision log commands")
 console = Console()
@@ -26,7 +26,7 @@ def list_decisions(
     records = records[-limit:] if limit > 0 else records
 
     if output_json:
-        print(json.dumps([record.model_dump(mode="json") for record in records], indent=2))
+        print_json([record.model_dump(mode="json") for record in records])
         return
 
     if not records:
@@ -64,13 +64,13 @@ def show_decision(
     record = find_decision(decision_id)
     if record is None:
         if output_json:
-            print(json.dumps({"error": "Decision not found or prefix is ambiguous"}))
+            print_json_error("Decision not found or prefix is ambiguous")
         else:
             console.print("[red]Decision not found or prefix is ambiguous.[/red]")
         raise typer.Exit(1)
 
     if output_json:
-        print(record.model_dump_json(indent=2))
+        print_json(record.model_dump(mode="json"))
         return
 
     console.print(f"[bold]Decision:[/bold] {record.id}")
@@ -98,7 +98,7 @@ def export_decisions(
     records = load_decisions()
 
     if output_json:
-        print(json.dumps([record.model_dump(mode="json") for record in records], indent=2))
+        print_json([record.model_dump(mode="json") for record in records])
         return
 
     markdown = decisions_to_markdown(records)

@@ -281,3 +281,23 @@ class TestCampaignOperations:
             client = SearchAdsClient(mock_credentials, app_config=mock_app_config)
             assert client.app_config.app_id == 999999
             assert client.app_config.app_name == "TestApp"
+
+    def test_raw_campaign_report_includes_group_by(self, mock_client):
+        """Raw campaign reports should pass generic Apple groupBy fields through."""
+        mock_response = {"data": {"reportingDataResponse": {"row": []}}}
+
+        with patch.object(mock_client, "_request", return_value=mock_response) as request:
+            result = mock_client.get_raw_campaign_report(
+                123,
+                group_by=["countryOrRegion", "deviceClass"],
+                return_records_with_no_metrics=True,
+            )
+
+        assert result == mock_response
+        method, endpoint = request.call_args.args
+        payload = request.call_args.kwargs["data"]
+        assert method == "POST"
+        assert endpoint == "/reports/campaigns"
+        assert payload["groupBy"] == ["countryOrRegion", "deviceClass"]
+        assert payload["returnRecordsWithNoMetrics"] is True
+        assert payload["selector"]["conditions"][0]["values"] == ["123"]
