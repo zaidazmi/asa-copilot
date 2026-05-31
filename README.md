@@ -357,3 +357,5 @@ asa optimize --help
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Originally forked from `cameronehrlich/apple-search-ads-cli`; `asa-copilot` is evolving as a separate operations-focused CLI.
