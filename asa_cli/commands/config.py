@@ -22,6 +22,7 @@ from ..config import (
     load_rules,
     prompt_for_app_config,
     prompt_for_credentials,
+    resolve_app_slug,
     save_app_config,
     save_credentials,
     save_multi_app_config,
@@ -276,16 +277,16 @@ def switch_app(
     """Switch the active app."""
     multi = load_multi_app_config()
 
-    if slug not in multi.apps:
-        console.print(f"[red]App '{slug}' not found.[/red]")
-        if multi.apps:
-            console.print(f"[yellow]Available apps: {', '.join(multi.apps.keys())}[/yellow]")
+    try:
+        resolved_slug = resolve_app_slug(slug)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
-    multi.active_app = slug
+    multi.active_app = resolved_slug
     save_multi_app_config(multi)
-    app_config = multi.apps[slug]
-    console.print(f"[green]Switched active app to: {app_config.app_name} ({slug})[/green]")
+    app_config = multi.apps[resolved_slug]
+    console.print(f"[green]Switched active app to: {app_config.app_name} ({resolved_slug})[/green]")
 
 
 @app.command("remove-app")

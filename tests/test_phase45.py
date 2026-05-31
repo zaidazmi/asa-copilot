@@ -53,6 +53,51 @@ def test_guide_hygiene_pauses_duplicates_and_adds_discovery_negatives():
     assert negative_actions[0].match_type == MatchType.EXACT
 
 
+def test_guide_hygiene_scopes_duplicates_and_negatives_by_country():
+    client = MagicMock()
+    campaigns = [
+        {"id": 1, "name": "Noteo - Discovery - US", "countriesOrRegions": ["US"]},
+        {"id": 2, "name": "Noteo - Discovery - AU", "countriesOrRegions": ["AU"]},
+        {"id": 3, "name": "Noteo - Category - US", "countriesOrRegions": ["US"]},
+        {"id": 4, "name": "Noteo - Category - AU", "countriesOrRegions": ["AU"]},
+    ]
+
+    client.get_ad_groups.side_effect = lambda campaign_id: {
+        1: [{"id": 10, "name": "Discovery-US", "automatedKeywordsOptIn": False}],
+        2: [{"id": 20, "name": "Discovery-AU", "automatedKeywordsOptIn": False}],
+        3: [{"id": 30, "name": "Category-US", "automatedKeywordsOptIn": False}],
+        4: [{"id": 40, "name": "Category-AU", "automatedKeywordsOptIn": False}],
+    }[campaign_id]
+    client.get_keywords.side_effect = lambda campaign_id, ad_group_id: {
+        (1, 10): [],
+        (2, 20): [],
+        (3, 30): [
+            {"id": 300, "text": "shared term", "matchType": "EXACT", "status": "ACTIVE"},
+            {"id": 301, "text": "us term", "matchType": "EXACT", "status": "ACTIVE"},
+        ],
+        (4, 40): [
+            {"id": 400, "text": "shared term", "matchType": "EXACT", "status": "ACTIVE"},
+            {"id": 401, "text": "au term", "matchType": "EXACT", "status": "ACTIVE"},
+        ],
+    }[(campaign_id, ad_group_id)]
+    client.get_negative_keywords.return_value = []
+
+    rules = load_rules(app_config=AppConfig(app_id=123, app_name="Noteo"))
+
+    actions = build_guide_hygiene_actions(client, campaigns, app_name=None, rules=rules)
+
+    pause_actions = [action for action in actions if action.type == PlanActionType.PAUSE_KEYWORD]
+    negative_actions = [
+        action for action in actions if action.type == PlanActionType.ADD_NEGATIVE_KEYWORDS
+    ]
+
+    assert pause_actions == []
+    assert len(negative_actions) == 2
+    negatives_by_campaign = {action.campaign_id: action.keywords for action in negative_actions}
+    assert negatives_by_campaign[1] == ["shared term", "us term"]
+    assert negatives_by_campaign[2] == ["au term", "shared term"]
+
+
 def test_guide_hygiene_flags_search_match_when_rules_disable_it():
     client = MagicMock()
     campaigns = [

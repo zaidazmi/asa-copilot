@@ -14,7 +14,8 @@ Use this skill when an agent needs to inspect, plan, or operate Apple Search Ads
 - Saved plans include app identity; apply should only run under the matching active app.
 - Every serving or spend mutation needs a clear reason. Use `--reason` for direct commands and `--note` when applying plans.
 - Treat Discovery as learning, exact campaigns as control, and negatives as guardrails against duplicate spend.
-- Use app scoping in multi-app setups: `asa --app <name> ...`; explicit campaign IDs are blocked when their `adamId` belongs to another active app.
+- Use app scoping in multi-app setups: `asa --app <selector> ...`; exact slugs and unique app-name fragments work, and unknown selectors fail before command execution.
+- Explicit campaign IDs are blocked when their `adamId` belongs to another active app.
 - Never push live changes from reports alone; turn recommendations into a plan or use an explicit mutating command.
 
 ## Common Commands

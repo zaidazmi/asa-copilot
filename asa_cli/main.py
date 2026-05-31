@@ -302,7 +302,11 @@ def main(
 ):
     """Apple Search Ads operations CLI."""
     if app_slug:
-        set_current_app(app_slug)
+        try:
+            set_current_app(app_slug)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
 
 
 if __name__ == "__main__":

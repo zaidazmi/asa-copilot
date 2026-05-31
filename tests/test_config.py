@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from typer.testing import CliRunner
 
 from asa_cli.config import (
     CAMPAIGN_STRUCTURE,
@@ -28,6 +29,7 @@ from asa_cli.config import (
     load_credentials,
     load_multi_app_config,
     load_rules,
+    resolve_app_slug,
     save_app_config,
     save_credentials,
     save_multi_app_config,
@@ -517,6 +519,77 @@ class TestMultiAppConfig:
                     result = get_active_app_config()
                     assert result is not None
                     assert result.app_name == "Stitch It"
+
+    def test_app_selector_resolves_unique_name_fragment(self):
+        """Short app selectors resolve to the stored generated slug."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+
+            config = MultiAppConfig(
+                active_app="loftoaiinteriordesign",
+                apps={
+                    "ainotetakernoteo": AppConfig(
+                        app_id=123,
+                        app_name="AI Note Taker : Noteo",
+                    ),
+                    "loftoaiinteriordesign": AppConfig(
+                        app_id=456,
+                        app_name="Lofto: AI Interior Design",
+                    ),
+                },
+            )
+
+            with patch("asa_cli.config.CONFIG_FILE", config_file):
+                with patch("asa_cli.config.CONFIG_DIR", config_dir):
+                    save_multi_app_config(config)
+
+            with patch("asa_cli.config.CONFIG_FILE", config_file):
+                assert resolve_app_slug("noteo") == "ainotetakernoteo"
+                assert resolve_app_slug("lofto") == "loftoaiinteriordesign"
+
+    def test_app_selector_rejects_unknown_slug(self):
+        """Unknown app selectors fail instead of silently falling back."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+
+            config = MultiAppConfig(
+                active_app="colorcub",
+                apps={"colorcub": AppConfig(app_id=456, app_name="ColorCub")},
+            )
+
+            with patch("asa_cli.config.CONFIG_FILE", config_file):
+                with patch("asa_cli.config.CONFIG_DIR", config_dir):
+                    save_multi_app_config(config)
+
+            with patch("asa_cli.config.CONFIG_FILE", config_file):
+                with pytest.raises(ValueError, match="not found"):
+                    set_current_app("missing")
+
+    def test_global_app_option_rejects_unknown_slug(self):
+        """The top-level --app option fails before command execution when unknown."""
+        from asa_cli.main import app
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+
+            config = MultiAppConfig(
+                active_app="colorcub",
+                apps={"colorcub": AppConfig(app_id=456, app_name="ColorCub")},
+            )
+
+            with patch("asa_cli.config.CONFIG_FILE", config_file):
+                with patch("asa_cli.config.CONFIG_DIR", config_dir):
+                    save_multi_app_config(config)
+
+            runner = CliRunner()
+            with patch("asa_cli.config.CONFIG_FILE", config_file):
+                result = runner.invoke(app, ["--app", "missing", "version"])
+
+        assert result.exit_code == 1
+        assert "App 'missing' not found" in result.output
 
     def test_single_app_returns_it_regardless(self):
         """Test single app is returned even without active_app set."""

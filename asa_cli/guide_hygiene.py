@@ -61,6 +61,16 @@ def _negative_key(negative: dict) -> tuple[str, str]:
     )
 
 
+def _campaign_countries(campaign: dict) -> tuple[str, ...]:
+    return tuple(sorted(campaign.get("countriesOrRegions", []) or []))
+
+
+def _countries_overlap(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
+    if not left or not right:
+        return True
+    return bool(set(left).intersection(right))
+
+
 def collect_keyword_inventory(
     client, campaigns: list[dict], *, app_name: Optional[str]
 ) -> list[dict]:
@@ -80,6 +90,7 @@ def collect_keyword_inventory(
                         "campaign_id": campaign.get("id"),
                         "campaign_name": campaign.get("name", ""),
                         "campaign_type": ctype,
+                        "countries": _campaign_countries(campaign),
                         "ad_group_id": ad_group.get("id"),
                         "ad_group_name": ad_group.get("name", ""),
                         "keyword_id": _keyword_id(keyword),
@@ -164,13 +175,14 @@ def build_guide_hygiene_actions(
 
     keyword_records = collect_keyword_inventory(client, campaigns, app_name=app_name)
 
-    by_keyword: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    by_keyword: dict[tuple[str, str, tuple[str, ...]], list[dict]] = defaultdict(list)
     for record in keyword_records:
-        by_keyword[(record["keyword"], record["match_type"])].append(record)
+        by_keyword[(record["keyword"], record["match_type"], record["countries"])].append(record)
 
-    for (term, match_type), records in by_keyword.items():
+    for (term, match_type, countries), records in by_keyword.items():
         if len(records) <= 1:
             continue
+        country_text = ", ".join(countries) if countries else "unknown countries"
         for duplicate in records[1:]:
             if duplicate.get("keyword_id") is None:
                 actions.append(
@@ -183,7 +195,11 @@ def build_guide_hygiene_actions(
                         ad_group_name=duplicate["ad_group_name"],
                         reason="Duplicate keyword is active in more than one place but has no keyword ID to pause safely",
                         source="guide_hygiene",
-                        metadata={"check_type": "duplicate_keyword", "match_type": match_type},
+                        metadata={
+                            "check_type": "duplicate_keyword",
+                            "match_type": match_type,
+                            "countries": list(countries),
+                        },
                     )
                 )
                 continue
@@ -198,28 +214,38 @@ def build_guide_hygiene_actions(
                     keyword_id=duplicate["keyword_id"],
                     reason="Guide rule: one keyword should be active in one place",
                     source="guide_hygiene",
-                    before_metrics={"keyword": term, "match_type": match_type},
-                    metadata={"check_type": "duplicate_keyword"},
+                    before_metrics={
+                        "keyword": term,
+                        "match_type": match_type,
+                        "country_scope": country_text,
+                    },
+                    metadata={"check_type": "duplicate_keyword", "countries": list(countries)},
                 )
             )
 
-    exact_non_discovery_terms = sorted(
-        {
-            record["keyword"]
-            for record in keyword_records
-            if record["campaign_type"] != CampaignType.DISCOVERY
-            and record["match_type"] == MatchType.EXACT.value
-        }
-    )
+    exact_non_discovery_records = [
+        record
+        for record in keyword_records
+        if record["campaign_type"] != CampaignType.DISCOVERY
+        and record["match_type"] == MatchType.EXACT.value
+    ]
 
     for discovery in discovery_campaigns:
+        discovery_countries = _campaign_countries(discovery)
         existing_negatives = {
             _negative_key(negative)
             for negative in client.get_negative_keywords(discovery.get("id"))
         }
+        same_country_exact_terms = sorted(
+            {
+                record["keyword"]
+                for record in exact_non_discovery_records
+                if _countries_overlap(record["countries"], discovery_countries)
+            }
+        )
         missing = [
             term
-            for term in exact_non_discovery_terms
+            for term in same_country_exact_terms
             if (term, MatchType.EXACT.value) not in existing_negatives
         ]
         if missing:
@@ -233,7 +259,10 @@ def build_guide_hygiene_actions(
                     match_type=MatchType.EXACT,
                     reason="Prevent Discovery from competing with promoted exact keywords",
                     source="guide_hygiene",
-                    metadata={"check_type": "missing_discovery_negatives"},
+                    metadata={
+                        "check_type": "missing_discovery_negatives",
+                        "countries": list(discovery_countries),
+                    },
                 )
             )
 

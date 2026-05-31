@@ -253,10 +253,44 @@ class MultiAppConfig(BaseModel):
 _current_app_slug: Optional[str] = None
 
 
+def resolve_app_slug(selector: str) -> str:
+    """Resolve an app selector to a configured app slug.
+
+    Accepts exact slugs plus unique normalized fragments from the slug or app
+    name, so operators can use short selectors like ``--app noteo`` when the
+    stored slug is generated from the full App Store name.
+    """
+    multi = load_multi_app_config()
+    if not multi.apps:
+        raise ValueError("No apps configured. Run 'asa config setup' or 'asa config add-app'.")
+
+    normalized = get_app_slug(selector)
+    if selector in multi.apps:
+        return selector
+    if normalized in multi.apps:
+        return normalized
+
+    matches = [
+        slug
+        for slug, app_config in multi.apps.items()
+        if normalized and (normalized in slug or normalized in get_app_slug(app_config.app_name))
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"App selector '{selector}' is ambiguous. Matches: {', '.join(sorted(matches))}"
+        )
+
+    raise ValueError(
+        f"App '{selector}' not found. Available apps: {', '.join(sorted(multi.apps.keys()))}"
+    )
+
+
 def set_current_app(slug: Optional[str]) -> None:
     """Set the current app slug (called from --app flag in main.py callback)."""
     global _current_app_slug
-    _current_app_slug = slug
+    _current_app_slug = resolve_app_slug(slug) if slug else None
 
 
 def get_app_slug(app_name: str) -> str:

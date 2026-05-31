@@ -298,6 +298,8 @@ asa --app noteo campaigns list --all
 asa --app lofto search-terms mine --out lofto-plan.json
 ```
 
+`--app` accepts the stored slug or a unique normalized fragment of the app name, so short selectors like `noteo` and `lofto` work when they match only one configured app.
+
 ---
 
 ## Local checks
