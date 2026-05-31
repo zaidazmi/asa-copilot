@@ -1,4 +1,4 @@
-"""Configuration management for Apple Search Ads CLI."""
+"""Configuration management for ASA Copilot."""
 
 import json
 import os

@@ -10,9 +10,6 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "Cameron Ehrlich", email = "cameron@ehrlich.io"}
-]
-maintainers = [
     {name = "Zaid Azmi"}
 ]
 keywords = ["apple", "search-ads", "asa", "cli", "marketing", "app-store", "ios", "growth", "optimization"]

@@ -197,7 +197,7 @@ def test_connection():
 
     except ImportError as e:
         console.print(f"[red]Missing dependency: {e}[/red]")
-        console.print("  Run: pip install -e . (from the apple-search-ads directory)")
+        console.print("  Run: pip install -e . (from the asa-copilot directory)")
         raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]Connection failed: {e}[/red]")

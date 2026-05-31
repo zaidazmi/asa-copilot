@@ -53,7 +53,7 @@ def _require_reason(reason: Optional[str], action: str) -> str:
 @app.command("list")
 def list_campaigns(
     all_campaigns: bool = typer.Option(
-        False, "--all", "-a", help="Show all campaigns, not just ASA CLI managed"
+        False, "--all", "-a", help="Show all campaigns, not just ASA Copilot managed"
     ),
     filter_name: Optional[str] = typer.Option(
         None, "--filter", "-f", help="Filter campaigns by name"

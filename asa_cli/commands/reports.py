@@ -1435,7 +1435,10 @@ def report_bid_recommendations(
     """
     credentials = load_credentials()
     if not credentials:
-        console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        if output_json:
+            print(json.dumps({"error": "No credentials configured"}))
+        else:
+            console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
 
     app_config = get_current_app_config()
@@ -1461,7 +1464,7 @@ def report_bid_recommendations(
     def _filter_by_app(campaigns: list) -> list:
         return _scope_campaigns(campaigns)
 
-    if all_campaigns:
+    if all_campaigns or output_json or out:
         campaigns = _filter_by_app(client.get_campaigns())
         campaigns_to_report = campaigns
     elif campaign_id:

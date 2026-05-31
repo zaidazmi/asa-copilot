@@ -68,5 +68,5 @@ credentials.json
 # Local CodeGraph index
 .codegraph/
 
-# Local fork notes
+# Local project notes
 docs/

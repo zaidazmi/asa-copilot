@@ -1,2 +1,1 @@
-"""Tests for ASA CLI."""
-
+"""Tests for ASA Copilot."""

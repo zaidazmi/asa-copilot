@@ -65,7 +65,7 @@ app.add_typer(acl.app, name="acl", help="Access control, user management, and ap
 @app.command("version")
 def version():
     """Show version information."""
-    console.print(f"ASA CLI version {__version__}")
+    console.print(f"ASA Copilot version {__version__}")
 
 
 @app.command("help")
@@ -230,7 +230,7 @@ reporting, keyword management, and optimization.
   GitHub:
     https://github.com/zaidazmi/asa-copilot
 """
-    console.print(Panel(help_text, title="ASA CLI Help", border_style="cyan"))
+    console.print(Panel(help_text, title="ASA Copilot Help", border_style="cyan"))
 
 
 @app.command("apply")
