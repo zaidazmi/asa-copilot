@@ -1121,9 +1121,12 @@ class SearchAdsClient:
                 "POST",
                 f"/reports/campaigns/{campaign_id}/searchterms",
                 data=report_request,
+                quiet_errors=True,
             )
             return response.get("data", {}).get("reportingDataResponse", {}).get("row", [])
         except Exception as e:
+            if "DOES NOT CONTAIN SEARCHTERM" in str(e):
+                return []
             console.print(f"[red]Error fetching search terms report: {e}[/red]")
             return []
 
@@ -2078,9 +2081,12 @@ class SearchAdsClient:
                 "POST",
                 f"/reports/campaigns/{campaign_id}/adgroups/{ad_group_id}/searchterms",
                 data=report_request,
+                quiet_errors=True,
             )
             return response.get("data", {}).get("reportingDataResponse", {}).get("row", [])
         except Exception as e:
+            if "DOES NOT CONTAIN SEARCHTERM" in str(e):
+                return []
             console.print(
                 f"[red]Error fetching search terms for campaign {campaign_id} "
                 f"ad group {ad_group_id}: {e}[/red]"

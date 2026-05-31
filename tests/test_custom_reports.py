@@ -456,6 +456,18 @@ class TestKeywordAdGroupReport:
 class TestSearchTermsAdGroupReport:
     """Tests for get_search_terms_adgroup_report."""
 
+    def test_search_terms_campaign_report_empty_searchterm_error(self, mock_client):
+        """Treat Apple's empty search-term campaign report error as an empty report."""
+        with patch.object(
+            mock_client,
+            "_request",
+            side_effect=Exception("API error 400: CAMPAIGN DOES NOT CONTAIN SEARCHTERM"),
+        ) as mock_req:
+            result = mock_client.get_search_terms_report(123)
+
+        assert result == []
+        assert mock_req.call_args.kwargs["quiet_errors"] is True
+
     def test_search_terms_adgroup_report_uses_ortz(self, mock_client):
         """Test that search terms report uses ORTZ timezone (required)."""
         mock_response = {"data": {"reportingDataResponse": {"row": []}}}
@@ -519,6 +531,18 @@ class TestSearchTermsAdGroupReport:
             result = mock_client.get_search_terms_adgroup_report(123, 456)
 
         assert result == []
+
+    def test_search_terms_adgroup_report_empty_searchterm_error(self, mock_client):
+        """Treat Apple's empty search-term ad group report error as an empty report."""
+        with patch.object(
+            mock_client,
+            "_request",
+            side_effect=Exception("API error 400: CAMPAIGN DOES NOT CONTAIN SEARCHTERM"),
+        ) as mock_req:
+            result = mock_client.get_search_terms_adgroup_report(123, 456)
+
+        assert result == []
+        assert mock_req.call_args.kwargs["quiet_errors"] is True
 
     def test_search_terms_adgroup_report_no_metrics_false(self, mock_client):
         """Test that returnRecordsWithNoMetrics is False for search terms."""
