@@ -426,6 +426,7 @@ def build_optimization_plan(
     days: int,
     target_type: CampaignType,
     app_name: Optional[str],
+    app_id: Optional[int] = None,
 ) -> ChangePlan:
     """Build a durable plan from optimization analysis."""
     winner_terms = [w["term"] for w in winners]
@@ -450,6 +451,7 @@ def build_optimization_plan(
 
     return ChangePlan(
         source="optimize",
+        app_id=app_id,
         app_name=app_name,
         lookback_days=days,
         summary=(
@@ -669,6 +671,7 @@ def optimize_cmd(
         days=days,
         target_type=target_type,
         app_name=app_name,
+        app_id=app_config.app_id if app_config else None,
     )
     for action in optimization_plan.actions:
         action.metadata.setdefault("rules", rules.model_dump(mode="json"))

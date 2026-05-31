@@ -246,6 +246,7 @@ def mine_search_terms(
         days=days,
         target_type=target_type,
         app_name=app_name,
+        app_id=app_config.app_id if app_config else None,
     )
     plan.source = "search_terms_mine"
     plan.summary = (

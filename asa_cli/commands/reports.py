@@ -1641,6 +1641,7 @@ def report_bid_recommendations(
     recommendations = build_keyword_recommendations(keyword_rows, rules)
     recommendation_plan = ChangePlan(
         source="bid-recommendations",
+        app_id=app_config.app_id if app_config else None,
         app_name=app_name,
         lookback_days=days,
         summary=f"{len(recommendations)} keyword bid/pause recommendations",

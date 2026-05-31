@@ -11,6 +11,7 @@ from asa_cli.plans import (
     PlanActionType,
     PlanLoadError,
     PlanReasonError,
+    PlanScopeError,
     apply_plan,
     load_plan,
     save_applied_plan,
@@ -237,6 +238,56 @@ def test_apply_plan_campaign_pause_and_enable_actions():
     client.enable_campaign.assert_called_once_with(456)
 
 
+def test_apply_plan_rejects_plan_for_different_active_app():
+    """Plan-level app_id prevents applying a plan under the wrong app."""
+    client = MagicMock()
+    client.app_config = AppConfig(app_id=111, app_name="Lofto")
+    plan = ChangePlan(
+        app_id=222,
+        app_name="Noteo",
+        actions=[
+            PlanAction(
+                type=PlanActionType.PAUSE_CAMPAIGN,
+                description="Pause campaign",
+                campaign_id=123,
+                reason="Wrong app safety check",
+            )
+        ],
+    )
+
+    try:
+        apply_plan(client, plan)
+    except PlanScopeError as exc:
+        assert "Plan targets app 222" in str(exc)
+    else:
+        raise AssertionError("Expected PlanScopeError")
+
+    client.pause_campaign.assert_not_called()
+
+
+def test_apply_plan_rejects_action_campaign_outside_active_app():
+    """Old plans without app_id still validate each campaign before mutation."""
+    client = MagicMock()
+    client.app_config = AppConfig(app_id=111, app_name="Lofto")
+    client.get_campaign.return_value = {"id": 123, "name": "Noteo - Category", "adamId": 222}
+    plan = ChangePlan(
+        actions=[
+            PlanAction(
+                type=PlanActionType.PAUSE_CAMPAIGN,
+                description="Pause campaign",
+                campaign_id=123,
+                reason="Wrong app safety check",
+            )
+        ]
+    )
+
+    result = apply_plan(client, plan)
+
+    assert result.success is False
+    assert "not active app" in result.results[0].message
+    client.pause_campaign.assert_not_called()
+
+
 def test_build_optimization_plan_creates_promotion_and_negative_actions():
     """Optimization analysis becomes concrete plan actions."""
     client = MagicMock()
@@ -255,9 +306,11 @@ def test_build_optimization_plan_creates_promotion_and_negative_actions():
         days=14,
         target_type=CampaignType.CATEGORY,
         app_name="Test App",
+        app_id=123,
     )
 
     assert plan.source == "optimize"
+    assert plan.app_id == 123
     assert len(plan.actions) == 4
     assert plan.actions[0].type == PlanActionType.ADD_KEYWORDS
     assert plan.actions[0].ad_group_id == 200

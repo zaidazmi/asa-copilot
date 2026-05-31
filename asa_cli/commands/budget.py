@@ -380,6 +380,7 @@ def budget_pacing(
     )
     plan = ChangePlan(
         source="budget_pacing",
+        app_id=app_config.app_id if app_config else None,
         app_name=app_name,
         lookback_days=resolved_days,
         summary=f"{len(actions)} budget pacing actions over {resolved_days} days",

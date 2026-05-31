@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .api import SearchAdsClient
-from .config import CONFIG_DIR, MatchType, ensure_config_dir
+from .config import CONFIG_DIR, AppConfig, MatchType, campaign_matches_app, ensure_config_dir
 from .decisions import log_applied_plan_decisions
 
 console = Console()
@@ -31,6 +31,10 @@ class PlanLoadError(ValueError):
 
 class PlanReasonError(ValueError):
     """Raised when executable plan actions are missing reasons."""
+
+
+class PlanScopeError(ValueError):
+    """Raised when a plan targets a different app than the active app."""
 
 
 class PlanActionType(str, Enum):
@@ -94,6 +98,7 @@ class ChangePlan(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     source: str = "manual"
+    app_id: Optional[int] = None
     app_name: Optional[str] = None
     lookback_days: Optional[int] = None
     summary: str = ""
@@ -181,6 +186,41 @@ def validate_plan_reasons(plan: ChangePlan) -> None:
     raise PlanReasonError(f"Executable plan actions require reasons: {details}")
 
 
+def _client_app_config(client: SearchAdsClient) -> Optional[AppConfig]:
+    app_config = getattr(client, "app_config", None)
+    return app_config if isinstance(app_config, AppConfig) else None
+
+
+def validate_plan_app_scope(client: SearchAdsClient, plan: ChangePlan) -> None:
+    """Reject plans created for another app before applying any action."""
+    app_config = _client_app_config(client)
+    if app_config is None or plan.app_id is None:
+        return
+    if int(plan.app_id) != int(app_config.app_id):
+        raise PlanScopeError(
+            f"Plan targets app {plan.app_id}, but active app is "
+            f"{app_config.app_name} ({app_config.app_id})."
+        )
+
+
+def validate_action_app_scope(client: SearchAdsClient, action: PlanAction) -> Optional[str]:
+    """Return an error when an action's campaign is outside the active app."""
+    app_config = _client_app_config(client)
+    if app_config is None or action.campaign_id is None:
+        return None
+
+    campaign = client.get_campaign(action.campaign_id)
+    if not campaign:
+        return f"Campaign {action.campaign_id} not found"
+    if not campaign_matches_app(campaign, app_config):
+        return (
+            f"Campaign {action.campaign_id} belongs to app "
+            f"{campaign.get('adamId', 'unknown')}, not active app "
+            f"{app_config.app_name} ({app_config.app_id})"
+        )
+    return None
+
+
 def _duplicate_errors_only(errors: list[dict[str, Any]]) -> bool:
     return bool(errors) and all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors)
 
@@ -188,6 +228,16 @@ def _duplicate_errors_only(errors: list[dict[str, Any]]) -> bool:
 def apply_action(client: SearchAdsClient, action: PlanAction) -> ApplyActionResult:
     """Apply a single plan action."""
     try:
+        if action.type in EXECUTABLE_ACTION_TYPES:
+            scope_error = validate_action_app_scope(client, action)
+            if scope_error:
+                return ApplyActionResult(
+                    action_id=action.id,
+                    action_type=action.type,
+                    success=False,
+                    message=scope_error,
+                )
+
         if action.type == PlanActionType.ADD_KEYWORDS:
             if action.campaign_id is None or action.ad_group_id is None:
                 return ApplyActionResult(
@@ -401,6 +451,7 @@ def apply_action(client: SearchAdsClient, action: PlanAction) -> ApplyActionResu
 def apply_plan(client: SearchAdsClient, plan: ChangePlan) -> ApplyPlanResult:
     """Apply all actions in a plan."""
     validate_plan_reasons(plan)
+    validate_plan_app_scope(client, plan)
     results = [apply_action(client, action) for action in plan.actions]
     return ApplyPlanResult(
         plan_id=plan.id,

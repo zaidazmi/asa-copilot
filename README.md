@@ -54,7 +54,7 @@ Nothing touches your account without going through a reviewable JSON plan first.
 | Budget pacing | Flag capped winners, cut inefficient campaigns |
 | Campaign tools | Create, clone, update, pause, enable, audit |
 | Keyword tools | Add, route, promote, bid-update, manage negatives |
-| Multi-app | Manage multiple apps with `--app <slug>`; campaign IDs are scoped by app `adamId` |
+| Multi-app | Manage multiple apps with `--app <slug>`; plans and campaign IDs are scoped by app `adamId` |
 
 ---
 
@@ -277,6 +277,7 @@ Keep high-value exact terms controlled, use Discovery to learn, and avoid biddin
 ## Safety model
 
 - Spend-affecting recommendations go into a plan before anything runs
+- Saved plans record the target app ID and apply refuses wrong-app plans
 - Executable plan actions require a reason before save or apply
 - Direct campaign, keyword, and budget mutations capture a reason
 - Bid rules cap aggressive changes

@@ -28,6 +28,7 @@ from .config import load_credentials
 from .plans import (
     PlanLoadError,
     PlanReasonError,
+    PlanScopeError,
     apply_plan,
     display_apply_result,
     display_plan,
@@ -273,7 +274,7 @@ def apply_plan_cmd(
     client = SearchAdsClient(credentials)
     try:
         result = apply_plan(client, change_plan)
-    except PlanReasonError as exc:
+    except (PlanReasonError, PlanScopeError) as exc:
         if output_json:
             print(json.dumps({"error": str(exc)}))
         else:
