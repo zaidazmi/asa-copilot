@@ -29,9 +29,9 @@ asa apply plan.json --note "Approved after weekly review"
 
 ## Why asa-copilot
 
-Apple Ads Manager is good for checking your account. It is slower for repeatable operations: auditing campaign structure, finding bad search terms, moving winners into exact match, updating bids, watching budget pace, and remembering why a change was made.
+Apple Ads Manager is fine for glancing at your account. It punishes you the moment the work gets repetitive. Audit your campaign structure, dig out the search terms burning money, push converters into exact match, retune bids, watch budget pace, then try to recall why you touched anything last week. That is hours of clicking, and the dashboard keeps no memory of your reasoning.
 
-`asa-copilot` turns Apple Search Ads work into an operator loop:
+`asa-copilot` does the same work from the terminal in seconds, and it writes down every move. It turns Apple Search Ads into an operator loop:
 
 ```text
 inspect data -> apply rules -> review plan -> approve changes -> log decisions
