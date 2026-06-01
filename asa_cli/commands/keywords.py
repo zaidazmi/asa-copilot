@@ -1357,14 +1357,17 @@ def find_keywords(
 
     conditions = [
         {
-            "field": "text",
-            "operator": "CONTAINS",
-            "values": [query.lower()],
+            "field": "deleted",
+            "operator": "EQUALS",
+            "values": ["false"],
         }
     ]
 
     with console.status(f"[bold blue]Searching for '{query}'..."):
         keywords = client.find_targeting_keywords(campaign_id, conditions=conditions)
+
+    query_lower = query.lower()
+    keywords = [kw for kw in keywords if query_lower in kw.get("text", "").lower()]
 
     if not keywords:
         console.print(f"[yellow]No keywords matching '{query}' found.[/yellow]")

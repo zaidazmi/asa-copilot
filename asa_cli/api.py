@@ -964,11 +964,10 @@ class SearchAdsClient:
             if conditions:
                 selector["conditions"] = conditions
 
-            data = {"selector": selector}
             response = self._request(
                 "POST",
                 f"/campaigns/{campaign_id}/adgroups/targetingkeywords/find",
-                data=data,
+                data=selector,
             )
             return response.get("data", []) if isinstance(response, dict) else []
         except Exception as e:
@@ -1310,9 +1309,6 @@ class SearchAdsClient:
     ) -> Optional[dict[str, Any]]:
         """Update a campaign's country targeting.
 
-        Sets countriesOrRegions and clearGeoTargetingOnCountryOrRegionChange
-        to reset any sub-country geo targeting when countries change.
-
         Args:
             campaign_id: Campaign ID
             countries: List of country/region codes (e.g. ["US", "CA"])
@@ -1322,7 +1318,6 @@ class SearchAdsClient:
         """
         updates = {
             "countriesOrRegions": countries,
-            "clearGeoTargetingOnCountryOrRegionChange": True,
         }
         return self.update_campaign(campaign_id, updates)
 

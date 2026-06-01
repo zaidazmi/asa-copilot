@@ -254,18 +254,18 @@ class TestUpdateCampaignCountries:
             123,
             {
                 "countriesOrRegions": ["US", "CA"],
-                "clearGeoTargetingOnCountryOrRegionChange": True,
             },
         )
 
-    def test_update_campaign_countries_includes_clear_flag(self, mock_client):
-        """Test that clearGeoTargetingOnCountryOrRegionChange is always set."""
+    def test_update_campaign_countries_only_sends_supported_country_field(self, mock_client):
+        """Test that unsupported geo-reset fields are not sent."""
         with patch.object(mock_client, "update_campaign", return_value={"id": 123}) as mock_update:
             mock_client.update_campaign_countries(123, ["GB"])
 
         call_args = mock_update.call_args[0]
         updates = call_args[1]
-        assert updates["clearGeoTargetingOnCountryOrRegionChange"] is True
+        assert updates == {"countriesOrRegions": ["GB"]}
+        assert "clearGeoTargetingOnCountryOrRegionChange" not in updates
 
     def test_update_campaign_countries_failure(self, mock_client):
         """Test update failure returns None."""

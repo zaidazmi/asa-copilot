@@ -476,9 +476,9 @@ class TestFindTargetingKeywords:
 
         assert len(results) == 1
         call_data = mock_req.call_args.kwargs.get("data") or mock_req.call_args[1].get("data")
-        assert "selector" in call_data
-        assert call_data["selector"]["conditions"] == conditions
-        assert call_data["selector"]["pagination"] == {"offset": 0, "limit": 1000}
+        assert "selector" not in call_data
+        assert call_data["conditions"] == conditions
+        assert call_data["pagination"] == {"offset": 0, "limit": 1000}
 
     def test_find_empty_results(self, mock_client):
         """Test find with no matches."""
