@@ -420,11 +420,52 @@ def apply_action(client: SearchAdsClient, action: PlanAction) -> ApplyActionResu
                 message="Enabled campaign" if success else "Failed to enable campaign",
             )
 
+        if action.type == PlanActionType.UPDATE_AD_GROUP:
+            if action.campaign_id is None or action.ad_group_id is None:
+                return ApplyActionResult(
+                    action_id=action.id,
+                    action_type=action.type,
+                    success=False,
+                    message="Missing campaign_id or ad_group_id",
+                )
+
+            updates: dict[str, Any] = {}
+            currency = action.metadata.get("currency", "USD")
+            if action.bid_amount is not None:
+                updates["defaultBidAmount"] = {
+                    "amount": str(action.bid_amount),
+                    "currency": currency,
+                }
+            if action.metadata.get("name"):
+                updates["name"] = action.metadata["name"]
+            if action.metadata.get("status"):
+                updates["status"] = str(action.metadata["status"]).upper()
+            if "automatedKeywordsOptIn" in action.metadata:
+                updates["automatedKeywordsOptIn"] = bool(action.metadata["automatedKeywordsOptIn"])
+            elif "search_match_enabled" in action.metadata:
+                updates["automatedKeywordsOptIn"] = bool(action.metadata["search_match_enabled"])
+
+            if not updates:
+                return ApplyActionResult(
+                    action_id=action.id,
+                    action_type=action.type,
+                    success=False,
+                    message="No ad group updates provided",
+                )
+
+            updated = client.update_ad_group(action.campaign_id, action.ad_group_id, updates)
+            return ApplyActionResult(
+                action_id=action.id,
+                action_type=action.type,
+                success=updated is not None,
+                message="Updated ad group" if updated is not None else "Failed to update ad group",
+                data={"updated": updated or {}, "updates": updates},
+            )
+
         if action.type in {
             PlanActionType.CLONE_CAMPAIGN,
             PlanActionType.CREATE_CAMPAIGN,
             PlanActionType.CREATE_AD_GROUP,
-            PlanActionType.UPDATE_AD_GROUP,
         }:
             return ApplyActionResult(
                 action_id=action.id,

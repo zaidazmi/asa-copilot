@@ -238,6 +238,96 @@ def test_apply_plan_campaign_pause_and_enable_actions():
     client.enable_campaign.assert_called_once_with(456)
 
 
+def test_apply_plan_update_ad_group_bid_action():
+    """Ad group update plan actions dispatch to the ad group API."""
+    client = MagicMock()
+    client.update_ad_group.return_value = {
+        "id": 20,
+        "defaultBidAmount": {"amount": "2.5", "currency": "USD"},
+    }
+    plan = ChangePlan(
+        actions=[
+            PlanAction(
+                type=PlanActionType.UPDATE_AD_GROUP,
+                description="Raise default bid",
+                campaign_id=10,
+                ad_group_id=20,
+                ad_group_name="Discovery-Broad",
+                bid_amount=2.5,
+                reason="Campaign is under-delivering after review window",
+            )
+        ]
+    )
+
+    result = apply_plan(client, plan)
+
+    assert result.success is True
+    assert result.results[0].message == "Updated ad group"
+    client.update_ad_group.assert_called_once_with(
+        10,
+        20,
+        {"defaultBidAmount": {"amount": "2.5", "currency": "USD"}},
+    )
+
+
+def test_apply_plan_update_ad_group_metadata_fields():
+    """Ad group update actions can carry supported non-bid fields in metadata."""
+    client = MagicMock()
+    client.update_ad_group.return_value = {"id": 20, "name": "Renamed"}
+    plan = ChangePlan(
+        actions=[
+            PlanAction(
+                type=PlanActionType.UPDATE_AD_GROUP,
+                description="Rename and pause ad group",
+                campaign_id=10,
+                ad_group_id=20,
+                reason="Manual structure cleanup",
+                metadata={
+                    "name": "Renamed",
+                    "status": "paused",
+                    "search_match_enabled": True,
+                    "currency": "GBP",
+                },
+            )
+        ]
+    )
+
+    result = apply_plan(client, plan)
+
+    assert result.success is True
+    client.update_ad_group.assert_called_once_with(
+        10,
+        20,
+        {
+            "name": "Renamed",
+            "status": "PAUSED",
+            "automatedKeywordsOptIn": True,
+        },
+    )
+
+
+def test_apply_plan_update_ad_group_requires_update_fields():
+    """Ad group update actions fail clearly when no update payload can be built."""
+    client = MagicMock()
+    plan = ChangePlan(
+        actions=[
+            PlanAction(
+                type=PlanActionType.UPDATE_AD_GROUP,
+                description="No-op ad group update",
+                campaign_id=10,
+                ad_group_id=20,
+                reason="Regression test",
+            )
+        ]
+    )
+
+    result = apply_plan(client, plan)
+
+    assert result.success is False
+    assert result.results[0].message == "No ad group updates provided"
+    client.update_ad_group.assert_not_called()
+
+
 def test_apply_plan_rejects_plan_for_different_active_app():
     """Plan-level app_id prevents applying a plan under the wrong app."""
     client = MagicMock()
