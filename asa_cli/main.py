@@ -284,9 +284,13 @@ def apply_plan_cmd(
 
     if output_json:
         print_json(result.model_dump(mode="json"))
+        if not result.success:
+            raise typer.Exit(1)
         return
 
     display_apply_result(result)
+    if not result.success:
+        raise typer.Exit(1)
 
 
 @app.callback()

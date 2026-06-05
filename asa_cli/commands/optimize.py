@@ -725,3 +725,5 @@ def optimize_cmd(
     result = apply_plan(client, optimization_plan)
     save_applied_plan(optimization_plan, result)
     display_apply_result(result)
+    if not result.success:
+        raise typer.Exit(1)
