@@ -103,6 +103,90 @@ def test_campaigns_setup_uses_daily_budget_only():
         assert "budget" not in call.kwargs
 
 
+def test_campaigns_setup_campaign_failure_exits_nonzero():
+    """Setup should fail the command when a campaign cannot be created."""
+    client = MagicMock()
+    client.get_campaigns.return_value = []
+    client.create_campaign.side_effect = [
+        None,
+        {"id": 20, "name": "Category"},
+        {"id": 30, "name": "Competitor"},
+        {"id": 40, "name": "Discovery"},
+    ]
+    client.create_ad_group.return_value = {"id": 100, "name": "Exact"}
+
+    with (
+        patch("asa_cli.commands.campaigns.load_credentials", return_value=_credentials()),
+        patch("asa_cli.commands.campaigns.get_current_app_config", return_value=_app_config()),
+        patch("asa_cli.commands.campaigns.is_multi_app", return_value=False),
+        patch("asa_cli.commands.campaigns.SearchAdsClient", return_value=client),
+        patch("asa_cli.commands.campaigns.Confirm.ask", return_value=True),
+        patch("asa_cli.commands.campaigns.log_manual_decision"),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "campaigns",
+                "setup",
+                "--budget",
+                "30",
+                "--countries",
+                "DE",
+                "--reason",
+                "Regression test setup campaign failure",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "Failed to create brand campaign" in result.output
+    assert "setup step(s) failed" in result.output
+
+
+def test_campaigns_setup_ad_group_failure_exits_nonzero():
+    """Setup should fail the command when an ad group cannot be created."""
+    client = MagicMock()
+    client.get_campaigns.return_value = []
+    client.create_campaign.side_effect = [
+        {"id": 10, "name": "Brand"},
+        {"id": 20, "name": "Category"},
+        {"id": 30, "name": "Competitor"},
+        {"id": 40, "name": "Discovery"},
+    ]
+    client.create_ad_group.side_effect = [
+        {"id": 100, "name": "Brand-Exact"},
+        None,
+        {"id": 300, "name": "Competitor-Exact"},
+        {"id": 400, "name": "Discovery-Broad"},
+        {"id": 500, "name": "Discovery-SearchMatch"},
+    ]
+
+    with (
+        patch("asa_cli.commands.campaigns.load_credentials", return_value=_credentials()),
+        patch("asa_cli.commands.campaigns.get_current_app_config", return_value=_app_config()),
+        patch("asa_cli.commands.campaigns.is_multi_app", return_value=False),
+        patch("asa_cli.commands.campaigns.SearchAdsClient", return_value=client),
+        patch("asa_cli.commands.campaigns.Confirm.ask", return_value=True),
+        patch("asa_cli.commands.campaigns.log_manual_decision"),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "campaigns",
+                "setup",
+                "--budget",
+                "30",
+                "--countries",
+                "DE",
+                "--reason",
+                "Regression test setup ad group failure",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "Failed to create ad group" in result.output
+    assert "setup step(s) failed" in result.output
+
+
 def test_campaigns_update_uses_app_currency():
     """Campaign budget updates should use the active app currency."""
     client = MagicMock()

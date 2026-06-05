@@ -266,6 +266,7 @@ def setup_campaigns(
         if parse_campaign_name(c.get("name", ""))
     }
 
+    failure_count = 0
     for ctype, config in CAMPAIGN_STRUCTURE.items():
         campaign_name = get_campaign_name(ctype, app_name=app_name)
 
@@ -282,6 +283,7 @@ def setup_campaigns(
 
         if not campaign:
             console.print(f"[red]Failed to create {ctype.value} campaign[/red]")
+            failure_count += 1
             continue
 
         campaign_id = campaign.get("id")
@@ -303,6 +305,7 @@ def setup_campaigns(
                 created_ad_groups.append({"id": ad_group.get("id"), "name": ad_group.get("name")})
             else:
                 console.print(f"  [red]Failed to create ad group: {ag_config.name}[/red]")
+                failure_count += 1
 
         log_manual_decision(
             event_type="campaign_setup_created",
@@ -320,6 +323,10 @@ def setup_campaigns(
             },
             result={"campaign": campaign},
         )
+
+    if failure_count:
+        console.print(f"[red]{failure_count} setup step(s) failed.[/red]")
+        raise typer.Exit(1)
 
     console.print("\n[bold green]Campaign setup complete![/bold green]")
     console.print(
