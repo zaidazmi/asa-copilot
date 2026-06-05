@@ -450,6 +450,7 @@ def pause_campaign(
         if not Confirm.ask(f"Pause {len(managed)} managed campaigns?"):
             return
 
+        failure_count = 0
         for campaign in managed:
             cid = campaign.get("id")
             if client.pause_campaign(cid):
@@ -465,6 +466,10 @@ def pause_campaign(
                 )
             else:
                 console.print(f"[red]Failed to pause: {campaign.get('name')}[/red]")
+                failure_count += 1
+
+        if failure_count:
+            raise typer.Exit(1)
 
     elif campaign_id:
         campaign = require_campaign_in_current_app(client, campaign_id)
@@ -482,6 +487,7 @@ def pause_campaign(
             )
         else:
             console.print(f"[red]Failed to pause campaign {campaign_id}.[/red]")
+            raise typer.Exit(1)
     else:
         console.print("[red]Provide a campaign ID or use --all flag.[/red]")
         raise typer.Exit(1)
@@ -514,6 +520,7 @@ def enable_campaign(
         if not Confirm.ask(f"Enable {len(managed)} managed campaigns?"):
             return
 
+        failure_count = 0
         for campaign in managed:
             cid = campaign.get("id")
             if client.enable_campaign(cid):
@@ -529,6 +536,10 @@ def enable_campaign(
                 )
             else:
                 console.print(f"[red]Failed to enable: {campaign.get('name')}[/red]")
+                failure_count += 1
+
+        if failure_count:
+            raise typer.Exit(1)
 
     elif campaign_id:
         campaign = require_campaign_in_current_app(client, campaign_id)
@@ -546,6 +557,7 @@ def enable_campaign(
             )
         else:
             console.print(f"[red]Failed to enable campaign {campaign_id}.[/red]")
+            raise typer.Exit(1)
     else:
         console.print("[red]Provide a campaign ID or use --all flag.[/red]")
         raise typer.Exit(1)
@@ -862,6 +874,7 @@ def delete_campaign(
             console.print("[yellow]Cancelled.[/yellow]")
             return
 
+        failure_count = 0
         for campaign in unmanaged:
             cid = campaign.get("id")
             with console.status(f"Deleting {campaign.get('name')}..."):
@@ -878,6 +891,10 @@ def delete_campaign(
                     )
                 else:
                     console.print(f"[red]Failed to delete: {campaign.get('name')}[/red]")
+                    failure_count += 1
+
+        if failure_count:
+            raise typer.Exit(1)
 
     elif campaign_id:
         # Get campaign info for confirmation
@@ -908,6 +925,7 @@ def delete_campaign(
                 )
             else:
                 console.print(f"[red]Failed to delete campaign {campaign_id}.[/red]")
+                raise typer.Exit(1)
     else:
         console.print("[red]Provide a campaign ID or use --all-unmanaged flag.[/red]")
         raise typer.Exit(1)

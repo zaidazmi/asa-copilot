@@ -174,3 +174,93 @@ def test_adgroups_update_uses_app_currency():
         20,
         {"defaultBidAmount": {"amount": "2.5", "currency": "EUR"}},
     )
+
+
+def test_campaign_pause_failure_exits_nonzero():
+    """A failed campaign pause should not look successful to automation."""
+    client = MagicMock()
+    client.pause_campaign.return_value = False
+    campaign = {"id": 10, "name": "Brand", "adamId": 999999}
+
+    with (
+        patch("asa_cli.commands.campaigns.load_credentials", return_value=_credentials()),
+        patch("asa_cli.commands.campaigns.SearchAdsClient", return_value=client),
+        patch("asa_cli.commands.campaigns.require_campaign_in_current_app", return_value=campaign),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "campaigns",
+                "pause",
+                "10",
+                "--reason",
+                "Regression test failed campaign pause",
+            ],
+        )
+
+    assert result.exit_code == 1
+    client.pause_campaign.assert_called_once_with(10)
+
+
+def test_campaign_enable_all_partial_failure_exits_nonzero():
+    """Bulk campaign enable should fail the process if any campaign fails."""
+    client = MagicMock()
+    client.get_campaigns.return_value = [
+        {"id": 10, "name": "Brand", "adamId": 999999},
+        {"id": 20, "name": "Category", "adamId": 999999},
+    ]
+    client.enable_campaign.side_effect = [True, False]
+
+    with (
+        patch("asa_cli.commands.campaigns.load_credentials", return_value=_credentials()),
+        patch("asa_cli.commands.campaigns.get_current_app_config", return_value=_app_config()),
+        patch("asa_cli.commands.campaigns.SearchAdsClient", return_value=client),
+        patch("asa_cli.commands.campaigns.Confirm.ask", return_value=True),
+        patch("asa_cli.commands.campaigns.log_manual_decision"),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "campaigns",
+                "enable",
+                "--all",
+                "--reason",
+                "Regression test partial campaign enable failure",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert client.enable_campaign.call_count == 2
+    assert "Failed to enable" in result.output
+
+
+def test_campaign_delete_all_unmanaged_partial_failure_exits_nonzero():
+    """Bulk unmanaged deletion should fail the process if any delete fails."""
+    client = MagicMock()
+    client.get_campaigns.return_value = [
+        {"id": 10, "name": "Unmanaged One", "adamId": 999999},
+        {"id": 20, "name": "Unmanaged Two", "adamId": 999999},
+    ]
+    client.delete_campaign.side_effect = [True, False]
+
+    with (
+        patch("asa_cli.commands.campaigns.load_credentials", return_value=_credentials()),
+        patch("asa_cli.commands.campaigns.get_current_app_config", return_value=_app_config()),
+        patch("asa_cli.commands.campaigns.SearchAdsClient", return_value=client),
+        patch("asa_cli.commands.campaigns.log_manual_decision"),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "campaigns",
+                "delete",
+                "--all-unmanaged",
+                "--force",
+                "--reason",
+                "Regression test partial campaign delete failure",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert client.delete_campaign.call_count == 2
+    assert "Failed to delete" in result.output
