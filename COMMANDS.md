@@ -369,10 +369,9 @@ Usage: asa optimize [OPTIONS] COMMAND [ARGS]...
 │ --lookback                 TEXT     Lookback window, e.g. 14d. Overrides     │
 │                                     --days.                                  │
 │                                     [default: None]                          │
-│ --cpa-threshold    -c      FLOAT    Max CPA for winners (USD)                │
-│                                     [default: None]                          │
+│ --cpa-threshold    -c      FLOAT    Max CPA for winners [default: None]      │
 │ --min-installs     -i      INTEGER  Min installs to promote [default: None]  │
-│ --min-spend        -s      FLOAT    Min spend to consider blocking (USD)     │
+│ --min-spend        -s      FLOAT    Min spend to consider blocking           │
 │                                     [default: None]                          │
 │ --min-impressions          INTEGER  Min impressions to consider a term       │
 │                                     [default: None]                          │
