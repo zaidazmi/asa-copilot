@@ -9,7 +9,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from ..api import SearchAdsClient
-from ..config import load_credentials
+from ..config import get_current_app_config, load_credentials
 from ..decisions import log_manual_decision
 from .scope import require_campaign_in_current_app
 
@@ -88,7 +88,7 @@ def list_adgroups(
 def create_adgroup(
     campaign_id: int = typer.Option(..., "--campaign", "-c", help="Campaign ID"),
     name: str = typer.Argument(..., help="Ad group name"),
-    bid: float = typer.Option(1.50, "--bid", "-b", help="Default bid amount (USD)"),
+    bid: float = typer.Option(1.50, "--bid", "-b", help="Default bid amount"),
     search_match: bool = typer.Option(
         False, "--search-match/--no-search-match", help="Enable Search Match"
     ),
@@ -159,7 +159,7 @@ def update_adgroup(
     adgroup_id: int = typer.Argument(..., help="Ad group ID to update"),
     campaign_id: int = typer.Option(..., "--campaign", "-c", help="Campaign ID"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="New name"),
-    bid: Optional[float] = typer.Option(None, "--bid", "-b", help="New default bid (USD)"),
+    bid: Optional[float] = typer.Option(None, "--bid", "-b", help="New default bid"),
     search_match: Optional[bool] = typer.Option(
         None, "--search-match/--no-search-match", help="Toggle Search Match"
     ),
@@ -187,13 +187,15 @@ def update_adgroup(
     # Build updates
     updates = {}
     changes = []
+    app_config = get_current_app_config()
+    currency = app_config.currency if app_config else "USD"
 
     if name:
         updates["name"] = name
         changes.append(f"Name → {name}")
 
     if bid is not None:
-        updates["defaultBidAmount"] = {"amount": str(bid), "currency": "USD"}
+        updates["defaultBidAmount"] = {"amount": str(bid), "currency": currency}
         changes.append(f"Default Bid → ${bid}")
 
     if search_match is not None:

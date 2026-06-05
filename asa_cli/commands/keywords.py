@@ -266,7 +266,7 @@ def add_keywords(
         "-t",
         help="Campaign type: brand, category, competitor",
     ),
-    bid: Optional[float] = typer.Option(None, "--bid", "-b", help="Bid amount (USD)"),
+    bid: Optional[float] = typer.Option(None, "--bid", "-b", help="Bid amount"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without adding"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
     reason: Optional[str] = typer.Option(None, "--reason", help="Reason for adding keywords"),
@@ -347,6 +347,7 @@ def add_keywords(
         return
 
     target_id = target_campaign.get("id")
+    failure_count = 0
 
     # Get the exact match ad group
     ad_groups = client.get_ad_groups(target_id)
@@ -395,8 +396,10 @@ def add_keywords(
             console.print(f"[dim]Keywords already exist in {campaign_type.value} campaign[/dim]")
         else:
             console.print(f"[red]Failed: {errors[0].get('message', 'Unknown error')}[/red]")
+            failure_count += 1
     else:
         console.print(f"[red]Failed to add keywords to {campaign_type.value} campaign[/red]")
+        failure_count += 1
 
     # Add to discovery campaign
     if discovery_campaign:
@@ -441,6 +444,14 @@ def add_keywords(
                 e.get("messageCode") == "DUPLICATE_KEYWORD" for e in broad_errors
             ):
                 console.print("[dim]Keywords already exist in Discovery (broad match)[/dim]")
+            elif broad_errors:
+                console.print(
+                    f"[red]Failed: {broad_errors[0].get('message', 'Unknown error')}[/red]"
+                )
+                failure_count += 1
+            else:
+                console.print("[red]Failed to add keywords to Discovery (broad match)[/red]")
+                failure_count += 1
 
         # Add as negatives to discovery
         with console.status("[bold blue]Adding negatives to Discovery..."):
@@ -464,6 +475,16 @@ def add_keywords(
             )
         elif errors and all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors):
             console.print("[dim]Negative keywords already exist in Discovery[/dim]")
+        elif errors:
+            console.print(f"[red]Failed: {errors[0].get('message', 'Unknown error')}[/red]")
+            failure_count += 1
+        else:
+            console.print("[red]Failed to add negative keywords to Discovery[/red]")
+            failure_count += 1
+
+    if failure_count:
+        console.print(f"\n[red]Keyword addition failed in {failure_count} step(s).[/red]")
+        raise typer.Exit(1)
 
     console.print("\n[bold green]Keyword addition complete![/bold green]")
 
@@ -532,6 +553,7 @@ def add_negatives(
         return
 
     success_count = 0
+    failure_count = 0
     for campaign in target_campaigns:
         cid = campaign.get("id")
         cname = campaign.get("name")
@@ -559,8 +581,16 @@ def add_negatives(
                 success_count += 1
             else:
                 console.print(f"[red]Failed: {errors[0].get('message', 'Unknown error')}[/red]")
+                failure_count += 1
         else:
             console.print(f"[red]Failed to add negatives to {cname}[/red]")
+            failure_count += 1
+
+    if failure_count:
+        console.print(
+            f"\n[red]Negative keyword addition failed for {failure_count} campaign(s).[/red]"
+        )
+        raise typer.Exit(1)
 
     if success_count > 0:
         console.print("\n[bold green]Negative keywords processed![/bold green]")
@@ -577,7 +607,7 @@ def promote_keywords(
         "-t",
         help="Target campaign type: brand, category, competitor",
     ),
-    bid: Optional[float] = typer.Option(None, "--bid", "-b", help="Bid amount (USD)"),
+    bid: Optional[float] = typer.Option(None, "--bid", "-b", help="Bid amount"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without changes"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
     reason: Optional[str] = typer.Option(None, "--reason", help="Reason for promoting keywords"),
@@ -652,46 +682,52 @@ def promote_keywords(
 
     # Add to target campaign
     target_id = target_campaign.get("id")
+    failure_count = 0
     ad_groups = client.get_ad_groups(target_id)
     exact_ad_group = next(
         (ag for ag in ad_groups if "Exact" in ag.get("name", "")),
         ad_groups[0] if ad_groups else None,
     )
 
-    if exact_ad_group:
-        with console.status(f"[bold blue]Adding to {target_type.value}..."):
-            added, errors = client.add_keywords(
-                campaign_id=target_id,
-                ad_group_id=exact_ad_group.get("id"),
-                keywords=keyword_list,
-                match_type=MatchType.EXACT,
-                bid_amount=bid,
-            )
+    if not exact_ad_group:
+        console.print(f"[red]No ad group found in {target_type.value} campaign.[/red]")
+        raise typer.Exit(1)
 
-        if added:
-            console.print(
-                f"[green]Added {len(added)} keywords to {target_type.value} campaign[/green]"
-            )
-            log_manual_decision(
-                event_type="keywords_promoted",
-                reason=reason_text,
-                command="keywords promote",
-                campaign_id=target_id,
-                campaign_name=target_campaign.get("name"),
-                ad_group_id=exact_ad_group.get("id"),
-                ad_group_name=exact_ad_group.get("name"),
-                keywords=keyword_list,
-                metadata={"target_type": target_type.value, "bid": bid},
-                result={"added": added},
-            )
-        elif errors:
-            all_duplicates = all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors)
-            if all_duplicates:
-                console.print(f"[dim]Keywords already exist in {target_type.value} campaign[/dim]")
-            else:
-                console.print(f"[red]Failed: {errors[0].get('message', 'Unknown error')}[/red]")
+    with console.status(f"[bold blue]Adding to {target_type.value}..."):
+        added, errors = client.add_keywords(
+            campaign_id=target_id,
+            ad_group_id=exact_ad_group.get("id"),
+            keywords=keyword_list,
+            match_type=MatchType.EXACT,
+            bid_amount=bid,
+        )
+
+    if added:
+        console.print(
+            f"[green]Added {len(added)} keywords to {target_type.value} campaign[/green]"
+        )
+        log_manual_decision(
+            event_type="keywords_promoted",
+            reason=reason_text,
+            command="keywords promote",
+            campaign_id=target_id,
+            campaign_name=target_campaign.get("name"),
+            ad_group_id=exact_ad_group.get("id"),
+            ad_group_name=exact_ad_group.get("name"),
+            keywords=keyword_list,
+            metadata={"target_type": target_type.value, "bid": bid},
+            result={"added": added},
+        )
+    elif errors:
+        all_duplicates = all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors)
+        if all_duplicates:
+            console.print(f"[dim]Keywords already exist in {target_type.value} campaign[/dim]")
         else:
-            console.print(f"[red]Failed to add to {target_type.value}[/red]")
+            console.print(f"[red]Failed: {errors[0].get('message', 'Unknown error')}[/red]")
+            failure_count += 1
+    else:
+        console.print(f"[red]Failed to add to {target_type.value}[/red]")
+        failure_count += 1
 
     # Add as negatives to Discovery
     if discovery_campaign:
@@ -714,6 +750,16 @@ def promote_keywords(
             )
         elif errors and all(e.get("messageCode") == "DUPLICATE_KEYWORD" for e in errors):
             console.print("[dim]Negatives already exist in Discovery[/dim]")
+        elif errors:
+            console.print(f"[red]Failed: {errors[0].get('message', 'Unknown error')}[/red]")
+            failure_count += 1
+        else:
+            console.print("[red]Failed to add negatives to Discovery[/red]")
+            failure_count += 1
+
+    if failure_count:
+        console.print(f"\n[red]Promotion failed in {failure_count} step(s).[/red]")
+        raise typer.Exit(1)
 
     console.print("\n[bold green]Promotion complete![/bold green]")
 
@@ -815,6 +861,7 @@ def delete_keywords_cmd(
             )
         else:
             console.print("[red]Failed to delete some keywords.[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("update-bid")
@@ -822,7 +869,7 @@ def update_bid(
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     ad_group_id: Optional[int] = typer.Option(None, "--ad-group", "-g", help="Ad group ID"),
     keyword_id: Optional[int] = typer.Option(None, "--keyword", "-k", help="Keyword ID"),
-    bid: float = typer.Option(..., "--bid", "-b", help="New bid amount (USD)"),
+    bid: float = typer.Option(..., "--bid", "-b", help="New bid amount"),
     reason: Optional[str] = typer.Option(
         None, "--reason", help="Reason for updating the keyword bid"
     ),
@@ -895,6 +942,7 @@ def update_bid(
         )
     else:
         console.print(f"[red]Failed to update bid for keyword {keyword_id}.[/red]")
+        raise typer.Exit(1)
 
 
 @app.command("pause")
@@ -965,6 +1013,8 @@ def pause_keyword_cmd(
         console.print(
             f"\n[bold green]Paused {success_count}/{len(active_keywords)} keywords.[/bold green]"
         )
+        if success_count < len(active_keywords):
+            raise typer.Exit(1)
         return
 
     # Select keyword if not provided
@@ -1006,6 +1056,7 @@ def pause_keyword_cmd(
             )
         else:
             console.print(f"[red]Failed to pause keyword {keyword_id}.[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("enable")
@@ -1076,6 +1127,8 @@ def enable_keyword_cmd(
         console.print(
             f"\n[bold green]Enabled {success_count}/{len(paused_keywords)} keywords.[/bold green]"
         )
+        if success_count < len(paused_keywords):
+            raise typer.Exit(1)
         return
 
     # Select keyword if not provided
@@ -1117,6 +1170,7 @@ def enable_keyword_cmd(
             )
         else:
             console.print(f"[red]Failed to enable keyword {keyword_id}.[/red]")
+            raise typer.Exit(1)
 
 
 @app.command()
@@ -1335,6 +1389,7 @@ def delete_negatives(
         )
     else:
         console.print("[red]Failed to delete some negative keywords.[/red]")
+        raise typer.Exit(1)
 
 
 @app.command("find")
@@ -1399,7 +1454,7 @@ def find_keywords(
 
 @app.command("update-bids-bulk")
 def update_bids_bulk(
-    bid: float = typer.Option(..., "--bid", "-b", help="New bid amount (USD) for all keywords"),
+    bid: float = typer.Option(..., "--bid", "-b", help="New bid amount for all keywords"),
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
     ad_group_id: Optional[int] = typer.Option(None, "--ad-group", "-g", help="Ad group ID"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
@@ -1462,8 +1517,10 @@ def update_bids_bulk(
         return
 
     # Build bulk update payload
+    app_config = get_current_app_config()
+    currency = app_config.currency if app_config else "USD"
     updates = [
-        {"id": kw.get("id"), "bidAmount": {"amount": str(bid), "currency": "USD"}}
+        {"id": kw.get("id"), "bidAmount": {"amount": str(bid), "currency": currency}}
         for kw in keywords
     ]
 
@@ -1486,3 +1543,4 @@ def update_bids_bulk(
         )
     else:
         console.print("[red]Failed to update keyword bids.[/red]")
+        raise typer.Exit(1)

@@ -410,7 +410,7 @@ def budget_pacing(
 @app.command("create")
 def create_budget_order(
     name: str = typer.Option(..., "--name", "-n", help="Budget order name"),
-    budget: float = typer.Option(..., "--budget", "-b", help="Budget amount (USD)"),
+    budget: float = typer.Option(..., "--budget", "-b", help="Budget amount"),
     start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
     client_name: Optional[str] = typer.Option(None, "--client-name", help="Client name"),

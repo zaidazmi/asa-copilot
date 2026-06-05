@@ -167,6 +167,33 @@ def test_apply_plan_duplicate_keyword_errors_are_success():
     assert "already existed" in result.results[0].message
 
 
+def test_apply_plan_bulk_add_api_error_is_failure():
+    """Non-duplicate bulk-add errors must not be recorded as successful applies."""
+    client = MagicMock()
+    client.add_keywords.return_value = (
+        [],
+        [{"messageCode": "API_ERROR", "message": "network down"}],
+    )
+    plan = ChangePlan(
+        actions=[
+            PlanAction(
+                type=PlanActionType.ADD_KEYWORDS,
+                description="Promote winners",
+                campaign_id=10,
+                ad_group_id=20,
+                keywords=["meeting notes"],
+                reason="Search term has strong conversion quality",
+            )
+        ]
+    )
+
+    result = apply_plan(client, plan)
+
+    assert result.success is False
+    assert result.results[0].success is False
+    assert result.results[0].message == "network down"
+
+
 def test_save_applied_plan_writes_jsonl(tmp_path: Path):
     """Applied plans are appended to local audit history."""
     audit_path = tmp_path / "applied-plans.jsonl"

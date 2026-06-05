@@ -282,6 +282,87 @@ class TestCampaignOperations:
             assert client.app_config.app_id == 999999
             assert client.app_config.app_name == "TestApp"
 
+    def test_create_campaign_requires_daily_budget(self, mock_client):
+        """API v5 campaign creation requires a daily budget."""
+        with pytest.raises(ValueError, match="daily_budget is required"):
+            mock_client.create_campaign(name="Brand", budget=1500)
+
+    def test_create_campaign_uses_app_currency_without_lifetime_budget(self, mock_client):
+        """Daily-budget-only campaign creates should not add a lifetime budget."""
+        mock_client.app_config.currency = "EUR"
+        mock_response = {"data": {"id": 1, "name": "Brand"}}
+
+        with patch.object(mock_client, "_request", return_value=mock_response) as request:
+            result = mock_client.create_campaign(
+                name="Brand",
+                daily_budget=50,
+                countries=["DE"],
+            )
+
+        assert result == {"id": 1, "name": "Brand"}
+        payload = request.call_args.kwargs["data"]
+        assert payload["dailyBudgetAmount"] == {"amount": "50", "currency": "EUR"}
+        assert "budgetAmount" not in payload
+
+    def test_create_campaign_keeps_explicit_lifetime_budget(self, mock_client):
+        """An explicit lifetime budget remains supported at campaign creation."""
+        mock_client.app_config.currency = "GBP"
+        mock_response = {"data": {"id": 1, "name": "Brand"}}
+
+        with patch.object(mock_client, "_request", return_value=mock_response) as request:
+            mock_client.create_campaign(name="Brand", daily_budget=50, budget=1500)
+
+        payload = request.call_args.kwargs["data"]
+        assert payload["dailyBudgetAmount"] == {"amount": "50", "currency": "GBP"}
+        assert payload["budgetAmount"] == {"amount": "1500", "currency": "GBP"}
+
+    def test_create_ad_group_and_keywords_use_app_currency(self, mock_client):
+        """Bid payloads should use the configured app/org currency."""
+        mock_client.app_config.currency = "NZD"
+
+        with patch.object(mock_client, "_request", return_value={"data": {"id": 2}}) as request:
+            mock_client.create_ad_group(123, "Exact", default_bid=2.5, cpa_goal=4.0)
+
+        ad_group_payload = request.call_args.kwargs["data"]
+        assert ad_group_payload["defaultBidAmount"] == {"amount": "2.5", "currency": "NZD"}
+        assert ad_group_payload["cpaGoal"] == {"amount": "4.0", "currency": "NZD"}
+
+        with patch.object(mock_client, "_request", return_value={"data": [{"id": 3}]}) as request:
+            mock_client.add_keywords(123, 456, ["Test"], MatchType.EXACT, bid_amount=1.75)
+
+        keyword_payload = request.call_args.kwargs["data"]
+        assert keyword_payload[0]["bidAmount"] == {"amount": "1.75", "currency": "NZD"}
+
+    def test_keyword_bid_update_and_budget_order_use_app_currency(self, mock_client):
+        """Other spend-affecting API writes should use configured currency."""
+        mock_client.app_config.currency = "CAD"
+
+        with patch.object(mock_client, "_request", return_value={"data": [{"id": 3}]}) as request:
+            mock_client.update_keyword_bid(123, 456, 789, 2.25)
+
+        bid_payload = request.call_args.kwargs["data"]
+        assert bid_payload[0]["bidAmount"] == {"amount": "2.25", "currency": "CAD"}
+
+        with patch.object(mock_client, "_request", return_value={"data": {"id": 4}}) as request:
+            mock_client.create_budget_order("June", 5000, "2026-06-01", "2026-06-30")
+
+        budget_payload = request.call_args.kwargs["data"]
+        assert budget_payload["budget"] == {"amount": "5000", "currency": "CAD"}
+
+    def test_bulk_add_exceptions_return_api_error(self, mock_client):
+        """Callers need a non-duplicate error when the request itself fails."""
+        with patch.object(mock_client, "_request", side_effect=Exception("network down")):
+            added, errors = mock_client.add_keywords(123, 456, ["test"], MatchType.EXACT)
+
+        assert added == []
+        assert errors == [{"message": "network down", "messageCode": "API_ERROR"}]
+
+        with patch.object(mock_client, "_request", side_effect=Exception("api rejected")):
+            added, errors = mock_client.add_negative_keywords(123, ["blocked"])
+
+        assert added == []
+        assert errors == [{"message": "api rejected", "messageCode": "API_ERROR"}]
+
     def test_raw_campaign_report_includes_group_by(self, mock_client):
         """Raw campaign reports should pass generic Apple groupBy fields through."""
         mock_response = {"data": {"reportingDataResponse": {"row": []}}}

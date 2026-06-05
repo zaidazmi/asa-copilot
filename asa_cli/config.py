@@ -224,8 +224,8 @@ class AppConfig(BaseModel):
     app_id: int = Field(..., description="Apple App ID (adam_id)")
     app_name: str = Field(..., description="App name for display")
     default_countries: list[str] = Field(default=["US"], description="Default target countries")
-    default_bid: float = Field(default=1.50, description="Default keyword bid in USD")
-    default_cpa_goal: Optional[float] = Field(None, description="Default CPA goal in USD")
+    default_bid: float = Field(default=1.50, description="Default keyword bid in account currency")
+    default_cpa_goal: Optional[float] = Field(None, description="Default CPA goal in account currency")
     currency: str = Field(default="USD", min_length=3, max_length=3)
     goals: AppGoals = Field(default_factory=AppGoals)
     campaign_strategy: CampaignStrategyConfig = Field(default_factory=CampaignStrategyConfig)
@@ -700,11 +700,13 @@ def prompt_for_app_config() -> AppConfig:
     app_id = int(Prompt.ask("Apple App ID (adam_id)", default="0"))
     app_name = Prompt.ask("App name (for display)")
     countries = Prompt.ask("Default target countries (comma-separated)", default="US")
-    default_bid = float(Prompt.ask("Default keyword bid (USD)", default="1.50"))
+    currency = Prompt.ask("Account currency", default="USD").upper()
+    default_bid = float(Prompt.ask(f"Default keyword bid ({currency})", default="1.50"))
 
     return AppConfig(
         app_id=app_id,
         app_name=app_name,
         default_countries=[c.strip().upper() for c in countries.split(",")],
         default_bid=default_bid,
+        currency=currency,
     )

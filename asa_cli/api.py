@@ -254,14 +254,15 @@ class SearchAdsClient:
         """
         if self.app_config is None:
             raise ValueError("No app config. Run 'asa config setup' first.")
-        if daily_budget is None and budget is None:
-            raise ValueError("Either daily_budget or budget (lifetime) must be provided.")
+        if daily_budget is None:
+            raise ValueError("daily_budget is required for new API v5 campaigns.")
 
         try:
+            currency = self.app_config.currency
             campaign_data: dict[str, Any] = {
                 "name": name,
                 "adamId": self.app_config.app_id,
-                "dailyBudgetAmount": {"amount": str(daily_budget or budget), "currency": "USD"},
+                "dailyBudgetAmount": {"amount": str(daily_budget), "currency": currency},
                 "countriesOrRegions": countries or ["US"],
                 "status": status,
                 "supplySources": supply_sources or ["APPSTORE_SEARCH_RESULTS"],
@@ -269,7 +270,7 @@ class SearchAdsClient:
                 "billingEvent": billing_event,
             }
             if budget is not None:
-                campaign_data["budgetAmount"] = {"amount": str(budget), "currency": "USD"}
+                campaign_data["budgetAmount"] = {"amount": str(budget), "currency": currency}
 
             response = self._request("POST", "/campaigns", data=campaign_data)
             return response.get("data") if isinstance(response, dict) else None
@@ -449,10 +450,11 @@ class SearchAdsClient:
             from datetime import datetime, timezone
 
             start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000")
+            currency = self.app_config.currency if self.app_config else "USD"
 
             ad_group_data = {
                 "name": name,
-                "defaultBidAmount": {"amount": str(default_bid), "currency": "USD"},
+                "defaultBidAmount": {"amount": str(default_bid), "currency": currency},
                 "automatedKeywordsOptIn": search_match_enabled,
                 "pricingModel": "CPC",
                 "startTime": start_time,
@@ -471,7 +473,7 @@ class SearchAdsClient:
                 }
 
             if cpa_goal:
-                ad_group_data["cpaGoal"] = {"amount": str(cpa_goal), "currency": "USD"}
+                ad_group_data["cpaGoal"] = {"amount": str(cpa_goal), "currency": currency}
 
             response = self._request(
                 "POST", f"/campaigns/{campaign_id}/adgroups", data=ad_group_data
@@ -545,12 +547,13 @@ class SearchAdsClient:
             return [], []
 
         default_bid = bid_amount or (self.app_config.default_bid if self.app_config else 1.50)
+        currency = self.app_config.currency if self.app_config else "USD"
 
         keyword_objects = [
             {
                 "text": kw.strip().lower(),
                 "matchType": match_type.value,
-                "bidAmount": {"amount": str(default_bid), "currency": "USD"},
+                "bidAmount": {"amount": str(default_bid), "currency": currency},
             }
             for kw in keywords
             if kw.strip()
@@ -578,7 +581,7 @@ class SearchAdsClient:
             return added, errors
         except Exception as e:
             console.print(f"[red]Error adding keywords: {e}[/red]")
-            return [], []
+            return [], [{"message": str(e), "messageCode": "API_ERROR"}]
 
     def get_negative_keywords(self, campaign_id: int) -> list[dict[str, Any]]:
         """Get campaign-level negative keywords (handles pagination)."""
@@ -627,7 +630,7 @@ class SearchAdsClient:
             return added, errors
         except Exception as e:
             console.print(f"[red]Error adding negative keywords: {e}[/red]")
-            return [], []
+            return [], [{"message": str(e), "messageCode": "API_ERROR"}]
 
     def add_ad_group_negative_keywords(
         self, campaign_id: int, ad_group_id: int, keywords: list[str]
@@ -675,9 +678,10 @@ class SearchAdsClient:
     ) -> Optional[dict[str, Any]]:
         """Update bid amount for a keyword."""
         try:
+            currency = self.app_config.currency if self.app_config else "USD"
             # Use bulk update endpoint with keyword object including ID
             update_data = [
-                {"id": keyword_id, "bidAmount": {"amount": str(bid_amount), "currency": "USD"}}
+                {"id": keyword_id, "bidAmount": {"amount": str(bid_amount), "currency": currency}}
             ]
             response = self._request(
                 "PUT",
@@ -926,7 +930,7 @@ class SearchAdsClient:
             campaign_id: Campaign ID
             ad_group_id: Ad group ID
             updates: List of update dicts, e.g.
-                [{"id": 123, "bidAmount": {"amount": "2.5", "currency": "USD"}}, ...]
+                [{"id": 123, "bidAmount": {"amount": "2.5", "currency": "EUR"}}, ...]
 
         Returns:
             List of updated keyword data, or None on failure
@@ -1354,7 +1358,7 @@ class SearchAdsClient:
 
         Args:
             name: Budget order name
-            budget: Budget amount in USD
+            budget: Budget amount in the configured account currency
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
             **kwargs: Additional fields (e.g. clientName, primaryBuyerEmail)
@@ -1363,9 +1367,10 @@ class SearchAdsClient:
             Created budget order data or None on failure
         """
         try:
+            currency = self.app_config.currency if self.app_config else "USD"
             bo_data: dict[str, Any] = {
                 "name": name,
-                "budget": {"amount": str(budget), "currency": "USD"},
+                "budget": {"amount": str(budget), "currency": currency},
                 "startDate": start_date,
                 "endDate": end_date,
             }

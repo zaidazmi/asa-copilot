@@ -470,13 +470,13 @@ def optimize_cmd(
         None, "--lookback", help="Lookback window, e.g. 14d. Overrides --days."
     ),
     cpa_threshold: Optional[float] = typer.Option(
-        None, "--cpa-threshold", "-c", help="Max CPA for winners (USD)"
+        None, "--cpa-threshold", "-c", help="Max CPA for winners"
     ),
     min_installs: Optional[int] = typer.Option(
         None, "--min-installs", "-i", help="Min installs to promote"
     ),
     min_spend: Optional[float] = typer.Option(
-        None, "--min-spend", "-s", help="Min spend to consider blocking (USD)"
+        None, "--min-spend", "-s", help="Min spend to consider blocking"
     ),
     min_impressions: Optional[int] = typer.Option(
         None, "--min-impressions", help="Min impressions to consider a term"
